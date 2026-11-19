@@ -221,3 +221,39 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# PACE Project Specific Exclusions
+# ---------------------------------
+# FastF1 session cache
+fastf1_cache/
+.fastf1/
+*.cache/
+
+# Raw, processed, and historical data storage (preserving .gitkeep)
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+data/historical/*
+!data/historical/.gitkeep
+
+# Trained model artifacts and weights (preserving .gitkeep)
+models/*
+!models/.gitkeep
+*.joblib
+*.pkl
+*.pickle
+*.h5
+*.pt
+*.pth
+*.onnx
+
+# Generated reports and exports (preserving .gitkeep)
+reports/*
+!reports/.gitkeep
+
+# Credentials and secrets
+.env
+.env.*
+credentials.json
+client_secret*.json
