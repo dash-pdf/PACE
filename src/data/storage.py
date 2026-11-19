@@ -24,9 +24,22 @@ HISTORICAL_DIR = DEFAULT_BASE_DIR / "data" / "historical"
 def ensure_directories(base_dir: Optional[Path] = None) -> None:
     """Create data directories if they do not exist."""
     base = base_dir or DEFAULT_BASE_DIR
-    for sub in ["raw", "processed", "historical"]:
+    for sub in ["raw", "processed", "historical", "historical/driver_circuit"]:
         d = base / "data" / sub
         d.mkdir(parents=True, exist_ok=True)
+
+
+def get_driver_circuit_dir(base_dir: Optional[Path] = None) -> Path:
+    """Return path to driver-circuit intelligence directory."""
+    base = base_dir or DEFAULT_BASE_DIR
+    p = base / "data" / "historical" / "driver_circuit"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def get_driver_circuit_path(filename: str, base_dir: Optional[Path] = None) -> Path:
+    """Return destination path for driver-circuit intelligence file."""
+    return get_driver_circuit_dir(base_dir=base_dir) / filename
 
 
 def get_raw_path(category: str, season: int, filename: str, base_dir: Optional[Path] = None) -> Path:

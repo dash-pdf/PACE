@@ -12,8 +12,12 @@ from src.data.schemas import (
     LAPS_SCHEMA,
     PIT_STOPS_SCHEMA,
     PRACTICE_LAPS_SCHEMA,
+    DRIVER_CIRCUIT_APPEARANCES_SCHEMA,
+    DRIVER_CIRCUIT_AGGREGATED_SCHEMA,
+    CIRCUIT_CHARACTERISTICS_SCHEMA,
 )
-from src.data.fastf1_collector import FastF1Collector, parse_time_to_ms, classify_status
+from src.data.fastf1_collector import FastF1Collector, parse_time_to_ms, classify_status, extract_df
+from src.data.driver_circuit import DriverCircuitIntelligence, get_regulation_era, CIRCUIT_METRICS
 from src.data.storage import (
     save_parquet,
     load_parquet,
@@ -22,6 +26,8 @@ from src.data.storage import (
     get_processed_path,
     get_historical_path,
     get_raw_path,
+    get_driver_circuit_dir,
+    get_driver_circuit_path,
 )
 from src.data.validation import (
     ValidationReport,
@@ -31,6 +37,9 @@ from src.data.validation import (
     validate_events,
     validate_race_results,
     validate_qualifying_results,
+    validate_driver_circuit_appearances,
+    validate_driver_circuit_aggregated,
+    validate_circuit_characteristics,
 )
 from src.data.pipeline import HistoricalDataPipeline
 
@@ -46,9 +55,16 @@ __all__ = [
     "LAPS_SCHEMA",
     "PIT_STOPS_SCHEMA",
     "PRACTICE_LAPS_SCHEMA",
+    "DRIVER_CIRCUIT_APPEARANCES_SCHEMA",
+    "DRIVER_CIRCUIT_AGGREGATED_SCHEMA",
+    "CIRCUIT_CHARACTERISTICS_SCHEMA",
     "FastF1Collector",
+    "DriverCircuitIntelligence",
+    "get_regulation_era",
+    "CIRCUIT_METRICS",
     "parse_time_to_ms",
     "classify_status",
+    "extract_df",
     "save_parquet",
     "load_parquet",
     "dataset_exists",
@@ -56,6 +72,8 @@ __all__ = [
     "get_processed_path",
     "get_historical_path",
     "get_raw_path",
+    "get_driver_circuit_dir",
+    "get_driver_circuit_path",
     "ValidationReport",
     "validate_drivers",
     "validate_constructors",
@@ -63,5 +81,8 @@ __all__ = [
     "validate_events",
     "validate_race_results",
     "validate_qualifying_results",
+    "validate_driver_circuit_appearances",
+    "validate_driver_circuit_aggregated",
+    "validate_circuit_characteristics",
     "HistoricalDataPipeline",
 ]

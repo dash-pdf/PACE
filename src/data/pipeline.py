@@ -1,7 +1,7 @@
 """Historical data ingestion and compilation pipeline for PACE.
 
 Coordinates downloading, caching, normalizing, validating, and compiling
-Formula 1 datasets across the 2023-2026 seasons.
+Formula 1 datasets across historical seasons and driver-circuit intelligence.
 """
 
 from datetime import datetime, timezone
@@ -28,11 +28,13 @@ from src.data.storage import (
     ensure_directories,
     compile_historical_dataset,
     get_historical_path,
+    get_driver_circuit_path,
     load_parquet,
     dataset_exists,
     DEFAULT_BASE_DIR,
 )
 from src.data.fastf1_collector import FastF1Collector
+from src.data.driver_circuit import DriverCircuitIntelligence
 from src.data.validation import (
     validate_drivers,
     validate_constructors,
@@ -40,6 +42,9 @@ from src.data.validation import (
     validate_events,
     validate_race_results,
     validate_qualifying_results,
+    validate_driver_circuit_appearances,
+    validate_driver_circuit_aggregated,
+    validate_circuit_characteristics,
     ValidationReport,
 )
 
@@ -53,19 +58,22 @@ class HistoricalDataPipeline:
         self,
         seasons: Optional[List[int]] = None,
         base_dir: Optional[Path] = None,
-        request_delay: float = 0.3,
+        request_delay: float = 0.25,
     ):
         self.seasons = seasons or [2023, 2024, 2025, 2026]
         self.base_dir = base_dir or DEFAULT_BASE_DIR
         self.collector = FastF1Collector(request_delay=request_delay)
+        self.dc_intelligence = DriverCircuitIntelligence(request_delay=request_delay)
         ensure_directories(self.base_dir)
 
     def run_ingestion(
         self,
         force: bool = False,
         sample_only: bool = False,
+        include_driver_circuit: bool = True,
+        driver_ids: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
-        """Execute the ingestion process across all designated seasons."""
+        """Execute the ingestion process across all designated seasons and circuit intelligence."""
         logger.info(f"Starting PACE Historical Data Ingestion for seasons: {self.seasons}")
         metrics: Dict[str, Any] = {
             "seasons": self.seasons,
@@ -89,7 +97,6 @@ class HistoricalDataPipeline:
             season_metrics["events"] = len(df_events)
             season_metrics["sessions"] = len(df_sessions)
 
-            # Limit rounds if sample_only is requested
             max_rounds = 2 if sample_only else None
 
             # 2. Race & Qualifying Results
@@ -101,7 +108,7 @@ class HistoricalDataPipeline:
             season_metrics["qualifying_results"] = len(df_qualy)
             season_metrics["sprint_results"] = len(df_sprints)
 
-            # 3. Lap times & Pit stops (sample or full)
+            # 3. Lap times & Pit stops
             sample_rounds = [1, 2] if sample_only else None
             df_laps, df_pits = self.collector.collect_laps_and_pits(
                 season,
@@ -112,7 +119,7 @@ class HistoricalDataPipeline:
             season_metrics["laps"] = len(df_laps)
             season_metrics["pit_stops"] = len(df_pits)
 
-            # 4. Practice laps (sampling FP sessions to prevent excessive overhead)
+            # 4. Practice laps
             df_practice = self.collector.collect_practice_laps(
                 season,
                 max_sessions=2 if sample_only else 3,
@@ -122,7 +129,7 @@ class HistoricalDataPipeline:
 
             metrics["seasonal_summary"][season] = season_metrics
 
-        # 5. Compile into master historical datasets
+        # 5. Compile into master general historical datasets
         logger.info("Compiling seasonal datasets into master historical Parquet files...")
         categories = [
             ("drivers", DRIVERS_SCHEMA),
@@ -152,15 +159,57 @@ class HistoricalDataPipeline:
                 compiled_counts[cat] = 0
 
         metrics["compiled_totals"] = compiled_counts
+
+        # 6. Driver-Circuit Historical Intelligence
+        if include_driver_circuit:
+            logger.info("Building Driver-Circuit Historical Intelligence records...")
+            dc_metrics = self.run_driver_circuit_pipeline(
+                driver_ids=driver_ids,
+                force=force,
+                sample_only=sample_only,
+            )
+            metrics["driver_circuit_summary"] = dc_metrics
+
         metrics["completed_at"] = datetime.now(timezone.utc).isoformat()
         return metrics
 
+    def run_driver_circuit_pipeline(
+        self,
+        driver_ids: Optional[List[str]] = None,
+        force: bool = False,
+        sample_only: bool = False,
+    ) -> Dict[str, int]:
+        """Collect and compile complete driver-circuit appearance and aggregated datasets."""
+        # Default drivers: if sample_only, select key contemporary drivers
+        if sample_only and driver_ids is None:
+            driver_ids = ["max_verstappen", "hamilton", "alonso", "leclerc", "norris"]
+
+        df_app = self.dc_intelligence.build_driver_circuit_appearances(
+            driver_ids=driver_ids,
+            force=force,
+        )
+        # Circuit technical characteristics across all circuits in appearances & registry
+        df_char = self.dc_intelligence.build_circuit_characteristics(
+            df_appearances=df_app,
+            force=force,
+        )
+        df_agg = self.dc_intelligence.build_driver_circuit_aggregated(
+            df_appearances=df_app,
+            force=force,
+        )
+
+        return {
+            "circuit_characteristics": len(df_char),
+            "driver_circuit_appearances": len(df_app),
+            "driver_circuit_aggregated_profiles": len(df_agg),
+        }
+
     def run_validation(self) -> Dict[str, Any]:
-        """Execute data validation gates on the compiled historical datasets."""
+        """Execute data validation gates on all compiled datasets."""
         logger.info("Executing PACE Quality Validation Gates...")
         reports: Dict[str, Any] = {}
 
-        # Load compiled historical tables
+        # 1. General Historical Reference & Result Tables
         try:
             df_drivers = load_parquet(get_historical_path("drivers", base_dir=self.base_dir))
             df_const = load_parquet(get_historical_path("constructors", base_dir=self.base_dir))
@@ -168,33 +217,46 @@ class HistoricalDataPipeline:
             df_events = load_parquet(get_historical_path("events", base_dir=self.base_dir))
             df_race = load_parquet(get_historical_path("race_results", base_dir=self.base_dir))
             df_qualy = load_parquet(get_historical_path("qualifying", base_dir=self.base_dir))
+
+            reports["drivers"] = validate_drivers(df_drivers).summary()
+            reports["constructors"] = validate_constructors(df_const).summary()
+            reports["circuits"] = validate_circuits(df_circuits).summary()
+            reports["events"] = validate_events(df_events, df_circuits=df_circuits).summary()
+            reports["race_results"] = validate_race_results(df_race, df_drivers=df_drivers, df_constructors=df_const, df_events=df_events).summary()
+            reports["qualifying"] = validate_qualifying_results(df_qualy).summary()
         except Exception as e:
-            logger.error(f"Cannot run validation, required historical datasets missing: {e}")
-            return {"error": str(e), "is_valid": False}
+            logger.error(f"Error validating general historical datasets: {e}")
+            reports["general_historical_error"] = str(e)
 
-        # Run checks
-        r_drivers = validate_drivers(df_drivers)
-        r_const = validate_constructors(df_const)
-        r_circuits = validate_circuits(df_circuits)
-        r_events = validate_events(df_events, df_circuits=df_circuits)
-        r_race = validate_race_results(df_race, df_drivers=df_drivers, df_constructors=df_const, df_events=df_events)
-        r_qualy = validate_qualifying_results(df_qualy)
+        # 2. Driver-Circuit Intelligence Tables (if present)
+        app_path = get_driver_circuit_path("driver_circuit_appearances.parquet", base_dir=self.base_dir)
+        agg_path = get_driver_circuit_path("driver_circuit_aggregated.parquet", base_dir=self.base_dir)
+        char_path = get_driver_circuit_path("circuit_characteristics.parquet", base_dir=self.base_dir)
 
-        reports["drivers"] = r_drivers.summary()
-        reports["constructors"] = r_const.summary()
-        reports["circuits"] = r_circuits.summary()
-        reports["events"] = r_events.summary()
-        reports["race_results"] = r_race.summary()
-        reports["qualifying"] = r_qualy.summary()
+        if dataset_exists(app_path):
+            df_app = load_parquet(app_path)
+            reports["driver_circuit_appearances"] = validate_driver_circuit_appearances(df_app).summary()
 
-        all_valid = all(rep["is_valid"] for rep in reports.values())
+        if dataset_exists(agg_path):
+            df_agg = load_parquet(agg_path)
+            reports["driver_circuit_aggregated"] = validate_driver_circuit_aggregated(df_agg).summary()
+
+        if dataset_exists(char_path):
+            df_char = load_parquet(char_path)
+            reports["circuit_characteristics"] = validate_circuit_characteristics(df_char).summary()
+
+        all_valid = all(
+            rep.get("is_valid", False)
+            for rep in reports.values()
+            if isinstance(rep, dict) and "is_valid" in rep
+        )
+
         final_summary = {
             "evaluated_at": datetime.now(timezone.utc).isoformat(),
             "is_valid": all_valid,
             "components": reports,
         }
 
-        # Save report
         rep_dir = self.base_dir / "reports"
         rep_dir.mkdir(parents=True, exist_ok=True)
         rep_path = rep_dir / "historical_data_validation_report.json"

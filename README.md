@@ -87,7 +87,7 @@ PACE is structured around seven analytical engines:
 | Phase | Milestone | Status | Description |
 | :---: | :--- | :---: | :--- |
 | **Phase 1** | **Repository Creation & Project Foundation** | **Completed** | Project scaffolding, licensing, Git repository setup, virtual environment, and dependency configuration. |
-| **Phase 2** | **Historical Data Infrastructure** | **Completed** | Robust data ingestion, raw/processed Parquet storage, multi-season compilation (2023–2026), and quality validation gates. |
+| **Phase 2** | **Historical Data Infrastructure** | **Completed** | Multi-season ingestion (2023–2026), full career Driver–Circuit Historical Intelligence (2001–2026), circuit characteristics, teammate matching, Parquet storage, and quality validation gates. |
 | **Phase 3** | **Driver & Constructor Performance Modelling** | Planned | Baseline performance indices, rolling driver form, car developmental trajectory, and telemetry analysis. |
 | **Phase 4** | **Feature Engineering Pipeline** | Planned | Calculation of driver form ratings, car performance indices, tyre degradation curves, and circuit compatibility vectors. |
 | **Phase 5** | **Baseline & Machine Learning Models** | Planned | Implementation of baseline heuristics, regression models, and gradient-boosted ranking algorithms. |
@@ -99,14 +99,17 @@ PACE is structured around seven analytical engines:
 
 ## 7. Current Development Status
 
-- **Current Phase:** Phase 2 (Historical Data Infrastructure) — Completed
+- **Current Phase:** Phase 2 (Historical Data Infrastructure & Driver–Circuit Intelligence) — Completed
 - **Implemented Functionality:**
-  - Automated data ingestion for seasons 2023–2026 using FastF1 Ergast API and OpenF1 feeds.
-  - Three-tier storage architecture (`data/raw/`, `data/processed/`, `data/historical/`) with Parquet compression.
-  - Comprehensive schemas covering drivers, constructors, circuits, events, sessions, qualifying, race results, sprints, laps, pit stops, and practice runs.
-  - Automated quality validation gates verifying referential integrity, position validity, DNF/DNS/DSQ status flags, and coordinate ranges.
-  - Command-line interface with `--collect-data`, `--validate-data`, `--seasons`, and `--force` support.
-  - Comprehensive test suite with 17 unit/integration tests verifying schemas, storage, and validation gates.
+  - **General Seasonal Data (2023–2026):** Ingestion using FastF1 Ergast API and OpenF1 feeds covering race results, qualifying, sprints, practice telemetry (sector times, speed traps), and pit stops.
+  - **Driver–Circuit Historical Intelligence:** Full career race and qualifying records spanning 2001–2026 across 39 Grand Prix circuits for modern drivers and key historical teammates, preserving granular event-level records alongside aggregated performance profiles.
+  - **Technical Circuit Characteristics:** Engineering metrics (track length, typical laps, altitude, overtaking difficulty, tyre stress, downforce level, first GP) for all 39 world championship circuits.
+  - **Teammate Head-to-Head Matching:** Event-by-event teammate comparison in both race and qualifying sessions, preserving head-to-head win counts and win rates.
+  - **Regulation Era Context:** Automatic era classification (`ground_effect_2022_2026`, `turbo_hybrid_2014_2021`, `v8_2006_2013`, `v10_1996_2005`, `early_pre_1996`).
+  - **Resumable Three-Tier Storage:** Raw API JSON caches (`data/raw/`), seasonal Parquet tables (`data/processed/`), and compiled master historical datasets (`data/historical/`).
+  - **Automated Quality Validation Gates:** 9 quality validation suites verifying referential integrity, position validity, DNF/DNS/DSQ mutual exclusivity, and statistical bounds.
+  - **Command-Line Interface:** Complete CLI support via `main.py` with `--collect-circuit-history`, `--collect-data`, `--validate-data`, `--drivers`, `--seasons`, and `--force`.
+  - **Comprehensive Test Suite:** 24 unit and integration tests verifying schemas, storage, and validation gates with 100% pass rate.
 - **Planned Functionality:**
   - Prediction models, driver ratings, and simulation engines will be built on top of this infrastructure in Phase 3 onwards.
 

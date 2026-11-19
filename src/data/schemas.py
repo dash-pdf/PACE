@@ -188,3 +188,100 @@ PRACTICE_LAPS_SCHEMA = pa.schema([
     ("source_api", pa.string()),
     ("retrieved_at", pa.string()),
 ])
+
+
+# Driver-Circuit Historical Intelligence Schemas
+# -----------------------------------------------
+
+# Individual event-level appearance record
+DRIVER_CIRCUIT_APPEARANCES_SCHEMA = pa.schema([
+    ("driver_id", pa.string()),
+    ("circuit_id", pa.string()),
+    ("season", pa.int32()),
+    ("round", pa.int32()),
+    ("event_name", pa.string()),
+    ("event_date", pa.string()),
+    ("regulation_era", pa.string()),     # 'ground_effect_2022_2026', 'turbo_hybrid_2014_2021', 'v8_2006_2013', 'v10_1996_2005', 'early_pre_1996'
+    ("constructor_id", pa.string()),
+    ("constructor_name", pa.string()),
+    ("grid_position", pa.int32()),
+    ("finish_position", pa.int32()),
+    ("position_text", pa.string()),
+    ("positions_gained_lost", pa.int32()), # grid - finish (positive = gained, negative = lost)
+    ("points", pa.float64()),
+    ("laps_completed", pa.int32()),
+    ("status", pa.string()),
+    ("is_classified", pa.bool_()),
+    ("is_dnf", pa.bool_()),
+    ("is_dns", pa.bool_()),
+    ("is_dsq", pa.bool_()),
+    ("qualifying_position", pa.int32()),
+    ("q1_time_str", pa.string()),
+    ("q1_time_ms", pa.float64()),
+    ("q2_time_str", pa.string()),
+    ("q2_time_ms", pa.float64()),
+    ("q3_time_str", pa.string()),
+    ("q3_time_ms", pa.float64()),
+    ("fastest_lap_rank", pa.int32()),
+    ("fastest_lap_time", pa.string()),
+    ("fastest_lap_speed", pa.float64()),
+    ("total_race_time_ms", pa.float64()),
+    ("teammate_driver_id", pa.string()),
+    ("teammate_grid_position", pa.int32()),
+    ("teammate_finish_position", pa.int32()),
+    ("beat_teammate_race", pa.bool_()),
+    ("beat_teammate_qualy", pa.bool_()),
+    ("source_api", pa.string()),
+    ("retrieved_at", pa.string()),
+])
+
+# Aggregated driver-circuit performance profile
+DRIVER_CIRCUIT_AGGREGATED_SCHEMA = pa.schema([
+    ("driver_id", pa.string()),
+    ("circuit_id", pa.string()),
+    ("total_starts", pa.int32()),
+    ("first_season", pa.int32()),
+    ("latest_season", pa.int32()),
+    ("wins", pa.int32()),
+    ("podiums", pa.int32()),
+    ("poles", pa.int32()),
+    ("top_5_finishes", pa.int32()),
+    ("top_10_finishes", pa.int32()),
+    ("dnf_count", pa.int32()),
+    ("dnf_rate", pa.float64()),
+    ("total_points", pa.float64()),
+    ("avg_points_per_start", pa.float64()),
+    ("avg_grid_position", pa.float64()),
+    ("avg_finish_position", pa.float64()),
+    ("avg_positions_gained", pa.float64()),
+    ("best_finish_position", pa.int32()),
+    ("best_grid_position", pa.int32()),
+    ("teammate_race_h2h_wins", pa.int32()),
+    ("teammate_qualy_h2h_wins", pa.int32()),
+    ("teammate_race_h2h_rate", pa.float64()),
+    ("teammate_qualy_h2h_rate", pa.float64()),
+    ("ground_effect_starts", pa.int32()),
+    ("ground_effect_avg_finish", pa.float64()),
+    ("source_api", pa.string()),
+    ("retrieved_at", pa.string()),
+])
+
+# Circuit characteristics and technical profile
+CIRCUIT_CHARACTERISTICS_SCHEMA = pa.schema([
+    ("circuit_id", pa.string()),
+    ("circuit_name", pa.string()),
+    ("country", pa.string()),
+    ("locality", pa.string()),
+    ("latitude", pa.float64()),
+    ("longitude", pa.float64()),
+    ("first_grand_prix_year", pa.int32()),
+    ("total_races_held", pa.int32()),
+    ("circuit_length_km", pa.float64()),
+    ("typical_race_laps", pa.int32()),
+    ("overtaking_difficulty_rating", pa.string()), # 'Low', 'Medium', 'High'
+    ("tyre_stress_level", pa.string()),          # 'Low', 'Medium', 'High', 'Very High'
+    ("downforce_level", pa.string()),            # 'Low', 'Medium', 'High'
+    ("altitude_m", pa.float64()),
+    ("source_api", pa.string()),
+    ("retrieved_at", pa.string()),
+])

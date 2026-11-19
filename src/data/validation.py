@@ -221,3 +221,76 @@ def validate_qualifying_results(df_qualy: pd.DataFrame) -> ValidationReport:
     report.add_check("qualifying_valid_pos", invalid_pos == 0, f"Invalid qualifying positions count: {invalid_pos}")
 
     return report
+
+
+
+def validate_driver_circuit_appearances(df_app: pd.DataFrame) -> ValidationReport:
+    """Validate granular event-level driver circuit appearance records."""
+    report = ValidationReport()
+
+    if df_app.empty:
+        report.add_check("appearances_not_empty", False, "Driver circuit appearances dataframe is empty")
+        return report
+    report.add_check("appearances_not_empty", True, f"Found {len(df_app)} driver-circuit appearances")
+
+    # Uniqueness check on (driver_id, season, round)
+    dups = df_app.duplicated(subset=["driver_id", "season", "round"]).sum()
+    report.add_check("appearances_unique_entry", dups == 0, f"Duplicate (driver_id, season, round) count: {dups}")
+
+    # Classified positions
+    classified = df_app[df_app["is_classified"]]
+    invalid_pos = (classified["finish_position"] <= 0).sum()
+    report.add_check("appearances_valid_classified_pos", invalid_pos == 0, f"Classified drivers with invalid position: {invalid_pos}")
+
+    # Regulation era validity
+    valid_eras = {"ground_effect_2022_2026", "turbo_hybrid_2014_2021", "v8_2006_2013", "v10_1996_2005", "early_pre_1996"}
+    invalid_eras = (~df_app["regulation_era"].isin(valid_eras)).sum()
+    report.add_check("appearances_valid_eras", invalid_eras == 0, f"Appearances with invalid regulation era: {invalid_eras}")
+
+    return report
+
+
+def validate_driver_circuit_aggregated(df_agg: pd.DataFrame) -> ValidationReport:
+    """Validate aggregated driver-circuit profiles."""
+    report = ValidationReport()
+
+    if df_agg.empty:
+        report.add_check("aggregated_not_empty", False, "Aggregated driver-circuit dataframe is empty")
+        return report
+    report.add_check("aggregated_not_empty", True, f"Found {len(df_agg)} driver-circuit profile records")
+
+    # Uniqueness of (driver_id, circuit_id)
+    dups = df_agg.duplicated(subset=["driver_id", "circuit_id"]).sum()
+    report.add_check("aggregated_unique_profile", dups == 0, f"Duplicate (driver_id, circuit_id) profiles: {dups}")
+
+    # Starts positive
+    invalid_starts = (df_agg["total_starts"] <= 0).sum()
+    report.add_check("aggregated_positive_starts", invalid_starts == 0, f"Profiles with zero or negative starts: {invalid_starts}")
+
+    # Wins <= Starts
+    invalid_wins = (df_agg["wins"] > df_agg["total_starts"]).sum()
+    report.add_check("aggregated_wins_le_starts", invalid_wins == 0, f"Profiles with wins > starts: {invalid_wins}")
+
+    # DNF rate bounds [0.0, 1.0]
+    invalid_dnf = (~df_agg["dnf_rate"].between(0.0, 1.0)).sum()
+    report.add_check("aggregated_dnf_rate_bounds", invalid_dnf == 0, f"Profiles with DNF rate out of [0, 1]: {invalid_dnf}")
+
+    return report
+
+
+def validate_circuit_characteristics(df_char: pd.DataFrame) -> ValidationReport:
+    """Validate circuit technical characteristics."""
+    report = ValidationReport()
+
+    if df_char.empty:
+        report.add_check("characteristics_not_empty", False, "Circuit characteristics dataframe is empty")
+        return report
+    report.add_check("characteristics_not_empty", True, f"Found {len(df_char)} circuit technical profiles")
+
+    dups = df_char.duplicated(subset=["circuit_id"]).sum()
+    report.add_check("characteristics_unique_id", dups == 0, f"Duplicate circuit_id count: {dups}")
+
+    invalid_length = (df_char["circuit_length_km"] <= 0).sum()
+    report.add_check("characteristics_positive_length", invalid_length == 0, f"Circuits with length <= 0: {invalid_length}")
+
+    return report
