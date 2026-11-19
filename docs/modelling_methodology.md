@@ -1,353 +1,329 @@
 # PACE Phase 3: Driver & Constructor Performance Modelling Methodology
 
 **Predictive Analytics for Competitive Evaluation**  
-**Document Version:** 1.0.0 (Stage 1 Architecture)  
+**Document Version:** 2.0.0 (Stage 1 Architecture — Revised with Rigorous Methodological Refinements)  
 **Author:** PACE Engineering Team  
-**Status:** Under Review (Methodology Sign-Off)
+**Status:** Under Final Review (Methodology Sign-Off Prior to Stage 2)
 
 ---
 
-## 1. Executive Summary
+## 1. Executive Summary & Core Architectural Principles
 
-Formula 1 race finishing positions are governed by a complex, interdependent hierarchy of factors:
-1. **Car Competitiveness (Constructor):** Aerodynamic efficiency, power unit output, chassis balance, tyre degradation, and mechanical reliability.
-2. **Driver Capability:** Single-lap qualifying execution, wheel-to-wheel racecraft, tyre management, lap time consistency, and adaptability.
-3. **Driver–Circuit Historical Intelligence:** Track-specific affinity, driving style compatibility with circuit layout, and historical confidence.
-4. **Context & Circuit Topology:** Overtaking difficulty, downforce requirements, ambient altitude, temperature, tyre stress, and safety car probability.
-5. **Session Evolution & Grid Position:** Knockout qualifying starting position, clean vs dirty side of the grid, and Friday practice long-run race simulations.
+Formula 1 race finishing positions are the emergent result of complex interactions between human skill, machine competitiveness, circuit characteristics, environmental conditions, and strategic execution. 
 
-Phase 3 establishes the mathematical and statistical foundation for PACE. Rather than relying on naive averages, arbitrary percentage weightings, or data-leaking predictors, PACE formulates an empirical, hybrid predictive architecture:
-- **Separation of Concerns:** Independent quantification of the **Driver Performance Index (DPI)** and **Constructor Performance Index (CPI)** using network-connected teammate comparisons and telemetry decomposition.
-- **Hierarchical Driver–Circuit Intelligence:** Empirical Bayes shrinkage modeling track-specific performance while preventing small-sample distortion for rookies or debutants.
-- **Context-Aware Dynamic Interaction:** Machine learning models that learn dynamic non-linear feature interactions conditioned on physical circuit characteristics.
-- **Chronological Walk-Forward Backtesting:** Strictly leakage-free evaluation benchmarked against qualifying grid order and simple heuristics.
+PACE Phase 3 establishes the mathematical and statistical foundations of the PACE prediction engine. Following extensive engineering review, this methodology explicitly incorporates the following foundational principles:
+- **Separation of Directly Measured vs. Inferred Quantities:** Telemetry measurements (speed traps, micro-sector times, throttle application points) are strictly distinguished from inferred vehicle properties (aerodynamic downforce, mechanical grip). All inferred parameters carry explicit uncertainty bounds.
+- **Confounder-Aware Teammate Comparison:** Teammate comparisons provide the primary intra-team control, but are treated with statistical caution to account for asymmetric mechanical reliability, strategy divergence, incidents, team orders, and aerodynamic upgrade disparities.
+- **Decoupled Driver Experience vs. Latent Ability:** Experience is modeled as an uncertainty-reduction and learning-curve covariate; it does NOT automatically inflate estimated latent skill.
+- **Empirical Validation of Temporal Weighting:** Technical regulation era weights are treated as testable scientific hypotheses to be benchmarked against continuous exponential half-life decay and learned hierarchical variances.
+- **Unvalidated Assumptions Avoidance:** Fuel burn-off effects are modeled as latent variables with circuit sensitivity intervals rather than hardcoded point constants.
+- **Complete and Internally Consistent Race Outcome Space:** Explicitly partitions the outcome space into classified finishes (P1 to P$N$), mechanical retirements, incident-induced DNFs, non-classifications, and disqualifications (DSQ) such that total probability sums strictly to 1.0.
+- **End-to-End Uncertainty Propagation:** Latent driver skill, car pace, and circuit affinity carry probability distributions $(\mu, \sigma)$ into downstream ranking models.
+- **Multi-Model Benchmark Protocol:** Interpretable statistical baselines (Linear mixed models, Bradley-Terry, Ordinal Logistic) are evaluated alongside tree-based learning-to-rank algorithms on identical chronological walk-forward splits using paired significance testing.
+- **Explanatory Attribution vs. Causal Weights:** SHAP values and permutation importances are used exclusively for post-hoc prediction explanation, never converted into model weights or causal dials.
 
 ---
 
 ## 2. Driver Performance Index (DPI)
 
-### 2.1 The Fundamental Challenge of Separating Driver from Car
-In Formula 1, a driver's raw finishing position is heavily confounded by the performance of the constructor's car. A top-tier driver in an uncompetitive car will frequently finish behind an average driver in a championship-winning car.
+### 2.1 The Fundamental Challenge & Teammate Confounders
+In Formula 1, a driver's raw finishing position is heavily confounded by constructor machinery. Teammates provide the closest approximation of a controlled experiment, as both drivers operate the same baseline car. However, teammate comparisons are subject to severe real-world confounders that must be statistically controlled:
 
-The only direct "controlled experiment" in Grand Prix racing occurs between teammates competing in identical machinery during the same event under identical weather and track conditions. However, teammates cannot be evaluated in isolation: teammates change across seasons, creating an interconnected bipartite graph across the entire grid.
+1. **Asymmetric Mechanical Reliability:** One car may experience a sub-lethal failure (e.g. sensor drift, MGU-K de-rating, energy recovery clipping, aerodynamic floor damage from kerbs) that slows lap times without causing an outright retirement.
+2. **On-Track Incidents & First-Lap Contact:** Incidents triggered by third-party cars distort finishing positions without reflecting true driver pace.
+3. **Strategic Divergence:** Teams frequently split strategies (e.g. one-stop vs two-stop, starting on Hard vs Soft tyres, pitting under Safety Car vs staying out in dirty air). The driver on the compromised strategy suffers artificial pace degradation.
+4. **Team Orders & Pit Wall Priority:** Contractual driver hierarchies, priority pit stop timing (undercut advantage), and direct radio instructions ("do not hold up your teammate") systematically bias intra-team deltas.
+5. **Machinery & Upgrade Disparities:** Constructors regularly introduce aerodynamic upgrades (new floor edge, revised front wing, lighter chassis) on only *one* car due to manufacturing lead times.
 
-### 2.2 Mathematical Formulations
+### 2.2 Mitigation Strategy for Teammate Comparisons
+PACE addresses these confounders through rigorous filtering and robust statistical weighting:
+- **Incident & Damage Filtering:** Appearances where a driver sustained verified collision damage or floor perforation are flagged and excluded from baseline pace delta estimation.
+- **Clean Air Lap Extraction:** Rather than using raw race duration, teammate race pace deltas are calculated exclusively from matched stint laps where both drivers were running in "clean air" (gap to car ahead $> 1.5\text{ seconds}$) on the same tyre compound of comparable age ($\Delta\text{tyre age} \le 3\text{ laps}$).
+- **Strategy Normalization:** Finishing deltas are adjusted for compound baseline speed offsets derived from practice session tyre deltas.
+- **Team Orders Masking:** Known historical instances of contractual position swaps (e.g. team order events documented in race control messages) are treated as ties or masked for head-to-head outcome modeling.
 
-#### A. Teammate-Relative Qualifying Delta ($\Delta Q_{i,j,t}$)
-For driver $i$ and teammate $j$ at event $t$, the qualifying pace delta is defined using the best mutually completed qualifying session (Q3, Q2, or Q1):
-$$\Delta Q_{i,j,t} = \frac{T_{i,t}^{qual} - T_{j,t}^{qual}}{\min(T_{i,t}^{qual}, T_{j,t}^{qual})}$$
-- $\Delta Q_{i,j,t} < 0$: Driver $i$ was faster than teammate $j$.
-- In addition, the binary head-to-head metric is captured:
-$$H2H_{i,j,t}^{qual} = \mathbb{I}(QPos_{i,t} < QPos_{j,t})$$
+### 2.3 Candidate DPI Mathematical Formulations
 
-#### B. Teammate-Relative Race Delta ($\Delta R_{i,j,t}$)
-When both teammates are classified at event $t$:
-$$\Delta R_{i,j,t} = Pos_{j,t} - Pos_{i,t}$$
-$$\text{H2H}_{i,j,t}^{race} = \mathbb{I}(Pos_{i,t} < Pos_{j,t})$$
-When a retirement occurs:
-- If driver $j$ suffers a mechanical failure or non-driver DNF, the event is treated as non-comparable (masked as null for H2H).
-- If driver $i$ commits an unforced driver error / crash, $H2H_{i,j,t}^{race} = 0$.
+To identify the optimal driver rating mechanism, PACE evaluates three competing statistical paradigms on identical backtested data:
 
-#### C. Networked Rating Framework (Bayesian Glicko-2)
-To propagate relative performance across teams and eras, PACE implements a Glicko-2 rating engine where each Grand Prix session acts as a pairwise match between teammates.
-Each driver maintains:
-- Rating $\mu_i$: Latent driver skill (centered at 1500).
-- Rating Deviation $\phi_i$: Measure of uncertainty. For veterans with 200+ races (Hamilton, Alonso), $\phi_i$ is small; for rookies (Lindblad, Antonelli), $\phi_i$ is wider.
-- Rating Volatility $\sigma_i$: Measure of performance variance over time.
+#### Model 1: Glicko-2 Networked Paired Comparison Engine
+Extends the classic Elo rating system to model driver skill as a probability distribution $N(\mu_i, \phi_i^2)$ with dynamic volatility $\sigma_i$:
+- $\mu_i$: Latent driver skill estimate.
+- $\phi_i$: Rating deviation (epistemic uncertainty). Shrinks with active, consistent data; widens across off-seasons or sabbaticals.
+- $\sigma_i$: Rating volatility (aleatoric performance variability).
+The probability that driver $i$ outperforms teammate $j$ in clean session execution is:
+$$\mathbb{E}(s \mid \mu_i, \mu_j, \phi_j) = \frac{1}{1 + 10^{-g(\phi_j)(\mu_i - \mu_j) / 400}}$$
+where $g(\phi) = \left(1 + \frac{3q^2\phi^2}{\pi^2}\right)^{-1/2}$ and $q = \frac{\ln(10)}{400}$.
 
-The win probability of driver $i$ over driver $j$ is given by:
-$$E(s \mid \mu_i, \mu_j, \phi_j) = \frac{1}{1 + 10^{-g(\phi_j)(\mu_i - \mu_j) / 400}}$$
-where $g(\phi) = \frac{1}{\sqrt{1 + 3q^2\phi^2 / \pi^2}}$ and $q = \frac{\ln(10)}{400}$.
+#### Model 2: Hierarchical Bayesian Linear Mixed-Effects Model (LMM)
+Models lap time delta relative to field median as a linear mixed model with crossed random effects:
+$$y_{i,c,t} = \beta_0 + \beta_{grid} Grid_{i,t} + \mathbf{x}_{i,t}^T \boldsymbol{\gamma} + u_{driver(i)} + v_{constructor(c)} + w_{event(t)} + \epsilon_{i,c,t}$$
+- $u_{driver(i)} \sim N(0, \sigma_{driver}^2)$: Pure driver effect, isolated from constructor.
+- $v_{constructor(c)} \sim N(0, \sigma_{constructor}^2)$: Pure car effect.
+- $w_{event(t)} \sim N(0, \sigma_{event}^2)$: Race-specific intercept.
+- $\epsilon_{i,c,t} \sim N(0, \sigma_e^2)$: Observation noise.
+This provides a closed-form, simultaneous separation of driver vs car capability with full Bayesian posterior standard errors.
 
-#### D. Machinery-Adjusted Position Progress ($\Delta Pos_{adj}$)
-Raw positions gained ($Grid - Finish$) penalize drivers starting at the front (P1 can gain at most 0 positions, while P20 can gain 19 positions). PACE defines Machinery-Adjusted Progress by conditioning on starting position:
-$$\Delta Pos_{adj}(i,t) = (Grid_{i,t} - Finish_{i,t}) - \mathbb{E}[\Delta Pos \mid Grid_{i,t}, Era_t]$$
-where $\mathbb{E}[\Delta Pos \mid Grid, Era]$ is the empirical expected position change calculated from thousands of historical races within the corresponding regulation era.
+#### Model 3: Bradley-Terry Model with Team-Level Shared Intercepts
+Formulates paired comparisons conditioned on constructor covariates:
+$$\text{logit}(P(i \succ j \mid c)) = (\alpha_i - \alpha_j) + \mathbf{z}_{ij}^T \boldsymbol{\delta}$$
+where $\mathbf{z}_{ij}$ captures observed machinery deltas (e.g., upgrade version indicator, tyre age difference).
 
-#### E. Lap Time Consistency & Pace Variation ($CV_{pace}$)
-Using lap times from race stints and practice sessions (filtering out pit in/out laps, yellow flag, and safety car periods):
-$$CV_{pace}(i,t) = \frac{\sigma(T_{i,t}^{clean})}{\mu(T_{i,t}^{clean})}$$
-Drivers with low $CV_{pace}$ demonstrate superior tyre preservation and lap-to-lap rhythm.
+### 2.4 Decoupling Experience from Driver Ability
+A critical requirement of PACE is that **experience must not automatically inflate a driver's estimated capability**:
+- A veteran driver with 250 starts (e.g. Stroll, Hülkenberg) is not assumed to be faster than a superstar sophomore (e.g. Piastri) simply due to longevity.
+- Longevity without elite performance indicates survival, not superiority.
 
-#### F. Career Progression & Experience Curve
-Driver skill develops non-linearly with race starts:
-$$Exp_{i,t} = \ln(1 + N_{starts}(i,t))$$
-This logarithmic transformation models the steep initial rookie learning curve that asymptotically plateaus as experience surpasses 50+ starts.
+In PACE, driver experience $N_{starts}$ is parameterized strictly as:
+1. **An Uncertainty Reducer:** Lowering the prior rating deviation $\phi_i$ in Glicko-2, narrowing the posterior credible interval of the driver's skill parameter.
+2. **A Separate Rookie Learning Rate Covariate:** Modeled as a decaying marginal benefit function:
+   $$f_{learn}(N_{starts}) = 1.0 - \exp\left(-\frac{N_{starts}}{\tau_{learn}}\right)$$
+   where $\tau_{learn} \approx 25\text{ starts}$ (~1 full season). Beyond 50 starts, $f_{learn} \approx 1.0$, and experience provides zero additive baseline score.
+3. **An Interaction with Consistency:** High experience empirically reduces pace variance $CV_{pace}$, which is measured directly from lap times rather than imputed from starts.
 
 ---
 
 ## 3. Constructor Performance Index (CPI)
 
-### 3.1 Isolating Car Competitiveness
-A constructor's performance index must capture how fast the chassis and power unit can go, how well the car treats its tyres over long race distances, how aerodynamically efficient it is across different corner speed regimes, and how mechanically reliable it is.
+### 3.1 Directly Measured vs. Inferred Telemetry Features
+To maintain scientific rigor, PACE establishes an unambiguous boundary between what is directly observed and what is mathematically inferred:
 
-### 3.2 Mathematical Formulations
+| Telemetry Quantity | Classification | Source | Nature of Measurement | Uncertainty / Limitations |
+| :--- | :--- | :--- | :--- | :--- |
+| **Speed Trap Speeds ($ST_{speed}$)** | **Directly Measured** | OpenF1 Telemetry | Radar/laser timing line at end of longest straight | Affected by slipstream (tow), DRS status, and headwind. |
+| **Sector Times ($S_1, S_2, S_3$)** | **Directly Measured** | FastF1 / OpenF1 | Exact transponder timing loop elapsed seconds | Conflates engine power, aero drag, tyre grip, setup, and driver error. |
+| **Micro-Sector Speeds & Min Corner Apex Speed** | **Directly Measured** | OpenF1 / FastF1 | Wheel speed sensor and GPS velocity at apex | Affected by fuel load, track evolution, and driving line. |
+| **Aerodynamic Downforce Level** | **Inferred Feature** | Physical Model | Ratio of high-speed corner minimum velocity to straight-line terminal velocity | **High Uncertainty.** Setup dependent; cannot distinguish pure aero downforce from tyre compound grip. |
+| **Mechanical Grip / Low-Speed Traction** | **Inferred Feature** | Physical Model | Longitudinal acceleration ($a_x$) out of slow corners ($< 100\text{ km/h}$) | **Moderate Uncertainty.** Conflates differential tuning, tyre temperature, and throttle mapping. |
+| **Tyre Degradation Slope ($k_{deg}$)** | **Inferred Feature** | Linear/Huber Regression | Stint lap times vs elapsed laps | **Moderate Uncertainty.** Conflates tyre wear with fuel burn-off, traffic, and engine mode management. |
 
-#### A. Single-Lap Qualifying Pace Competitiveness
-The car's peak single-lap capability is defined by the best lap achieved by either car relative to pole position:
-$$\Delta T_{c,t}^{pole} = \frac{\min_{i \in c}(T_{i,t}^{qual}) - T_{pole,t}}{T_{pole,t}}$$
-Expressing this as a percentage gap standardizes across circuits of different lengths (e.g. 1m10s at Spielberg vs 1m45s at Spa).
+> [!IMPORTANT]
+> Sector times alone **never** isolate aerodynamic downforce or mechanical grip. A car with an exceptional power unit can set the fastest Sector 2 even with mediocre downforce. PACE treats downforce and mechanical grip as *latent inferred parameters* equipped with standard errors ($\sigma_{aero}, \sigma_{mech}$), never as direct sensor measurements.
 
-#### B. Sector Decomposition & Aerodynamic Efficiency Ratios
-Using split times from OpenF1 practice telemetry (`historical_practice_laps.parquet`):
-- **Straight-Line Speed Efficiency ($ST_{speed}$):** Median trap speed relative to the field maximum:
-  $$Eff_{straight}(c,t) = \frac{\text{median}(st\_speed_{c,t})}{\max_{k}(\text{median}(st\_speed_{k,t}))}$$
-- **High-Speed Downforce Index ($S_{high}$):** Relative time in high-lateral-g sectors (e.g. Silverstone Becketts, Suzuka Esses).
-- **Low-Speed Mechanical Grip Index ($S_{low}$):** Relative time in low-speed traction sectors (e.g. Monaco Rascasse, Montreal Hairpin).
+### 3.2 Fuel Load Modeling & Degradation Without Hardcoded Constants
+A fundamental limitation of public Formula 1 data is that **exact fuel mass is not directly observable**. FIA regulations mandate starting with $\le 110\text{ kg}$ of fuel in the race, but teams never publish their fuel load during Friday practice (FP1/FP2) or race stints.
 
-#### C. Tyre Degradation Rate ($k_{deg}$)
-In FP2 race simulation runs and completed race stints, lap times follow a characteristic degradation slope:
-$$T_{c,t}(l) = T_{c,0} + k_{deg} \cdot l + k_{fuel} \cdot (L_{tot} - l)$$
-where $k_{fuel} \approx -0.06 \text{ s/lap}$ accounts for the decreasing mass of fuel burn-off. The constructor tyre degradation coefficient $k_{deg}$ (seconds of pace loss per lap of tyre age) is estimated via robust linear regression (Huber loss).
+#### Flaws of Hardcoded Fuel Corrections:
+Assuming a static $-0.06\text{ s/lap}$ fuel burn-off correction introduces massive systemic error:
+1. Fuel sensitivity ($S_{fuel}$) varies wildly by circuit layout:
+   - At Monza (5.793 km, long full-throttle straights): $S_{fuel} \approx 0.035\text{ s per 10 kg}$.
+   - At Marina Bay (Singapore, stop-start high braking mass): $S_{fuel} \approx 0.075\text{ s per 10 kg}$.
+   - At Spa-Francorchamps (7.004 km, immense vertical elevation changes): $S_{fuel} \approx 0.080\text{ s per 10 kg}$.
+2. In practice sessions, teams run completely unannounced run plans: a driver on a 5-lap run might have 15 kg of fuel (qualifying simulation), while their teammate on an 18-lap run carries 80 kg (race simulation).
 
-#### D. Mechanical Reliability Index ($Rel_c$)
-Reliability is modeled as an exponentially weighted moving average of completed starts without mechanical failure:
-$$Rel_c(t) = 1.0 - \frac{\sum_{\tau < t} e^{-\lambda(t-\tau)} \cdot \mathbb{I}(\text{Mechanical DNF}_{c,\tau})}{\sum_{\tau < t} e^{-\lambda(t-\tau)} \cdot \text{Starts}_{c,\tau}}$$
-where $\lambda$ corresponds to a 10-race half-life, ensuring recent mechanical failures (e.g. engine blowouts, hydraulic leaks) lower the constructor's reliability score.
+#### PACE's Probabilistic Stint-Clustering & Latent Fuel Architecture:
+Rather than hardcoding fuel mass, PACE models stint pace via **Latent Fuel State Clustering**:
+1. **Stint Length Classification:** Runs are segmented by duration into:
+   - *Short Runs ($\le 6\text{ laps}$):* Inferred low fuel ($15 \pm 10\text{ kg}$). Focuses on single-lap peak performance.
+   - *Long Runs ($\ge 10\text{ laps}$):* Inferred high fuel ($60 \pm 20\text{ kg}$). Focuses on tyre degradation and race simulation.
+2. **Circuit Fuel Sensitivity Factor ($S_{fuel, c}$):** Computed from physical circuit parameters rather than guessed:
+   $$S_{fuel, c} = k_{mass} \cdot \left(\frac{L_{circuit}}{5.0}\right) \cdot (1 + \beta_{accel} \cdot N_{braking\_zones})$$
+   where $k_{mass} \approx 0.05\text{ s/lap/10kg}$ is scaled by track length and braking-to-traction acceleration events.
+3. **Robust Degradation Estimation ($k_{deg}$):** On identified long runs, lap times $T(l)$ are fitted using Huber M-estimation over laps $l \in [2, L-1]$ (excluding in/out laps):
+   $$T(l) = T_0 + \left(k_{deg} - S_{fuel, c} \cdot \frac{m_{fuel,0}}{L_{race}}\right) \cdot l + \epsilon_l$$
+   The resulting degradation slope $k_{deg}$ carries an empirical estimation standard error $\text{SE}(k_{deg})$ representing confidence in tyre life.
 
-#### E. Recent Form and In-Season Development Slope
-Constructors introduce upgrades throughout the season. The developmental trajectory is captured by the rolling linear trend of $\Delta T_{c,t}^{pole}$ over the previous 5 rounds:
-$$\beta_{dev}(c,t) = \text{Slope}\left(\Delta T_{c,t-5}^{pole}, \dots, \Delta T_{c,t-1}^{pole}\right)$$
-A negative slope indicates an accelerating car closing the gap to the front.
+### 3.3 Constructor Pace Index Components
+The final CPI feature vector incorporates:
+1. **Peak Qualifying Delta ($\Delta T_{c,t}^{pole}$):** Percentage gap to pole across both team cars.
+2. **Clean Air Race Pace Gap ($\Delta T_{c,t}^{race}$):** Median clean lap time gap to the fastest car on the same compound.
+3. **Trap Speed Percentile ($P_{ST}$):** Terminal straight-line velocity rank.
+4. **Degradation Coefficient and Uncertainty:** $(k_{deg}, \text{SE}(k_{deg}))$.
+5. **Exponential Mechanical Reliability ($Rel_c$):** 10-race half-life failure rate.
+6. **Rolling Development Trajectory ($\beta_{dev}$):** 5-race moving regression slope of relative pace.
 
 ---
 
 ## 4. Driver–Circuit Intelligence Integration
 
-### 4.1 The Small Sample Size Dilemma
-Historical circuit datasets present an inherent statistical challenge:
-- Veteran drivers (Hamilton, Alonso) have 15–20 appearances at classic tracks (Silverstone, Monza, Monaco).
-- Sophomores (Antonelli, Bortoleto, Hadjar) have 1–2 appearances.
-- Debutants (Lindblad, Hirakawa, Câmara) have 0–1 appearances.
+### 4.1 Empirical Bayes Shrinkage Formulation
+To prevent small-sample distortion for drivers with limited circuit starts while leveraging extensive historical records for veterans, PACE implements **Empirical Bayes Hierarchical Shrinkage**.
 
-If a driver finished P3 in their only career appearance at a track, a naive average would treat them as having an expected finish of 3.0 at that venue. Conversely, a veteran finishing P12 once in an uncompetitive car should not erase ten podiums.
-
-### 4.2 Empirical Bayes Shrinkage Formulation
-PACE resolves this using **Empirical Bayes Partial Pooling**. A driver's circuit-specific expected finishing performance $\widehat{\mu}_{i,c}$ is shrunk toward their global career baseline $\mu_{i}^{global}$:
-$$\widehat{\mu}_{i,c} = \alpha_{i,c} \cdot \bar{y}_{i,c} + (1 - \alpha_{i,c}) \cdot \mu_{i}^{global}$$
-where the shrinkage factor $\alpha_{i,c} \in [0, 1]$ is:
+For driver $i$ at circuit $c$, the circuit-specific performance index $\widehat{\mu}_{i,c}$ is formulated as a shrinkage estimator between their observed circuit sample mean $\bar{y}_{i,c}$ and their global career baseline $\mu_i^{global}$:
+$$\widehat{\mu}_{i,c} = \alpha_{i,c} \cdot \bar{y}_{i,c} + (1 - \alpha_{i,c}) \cdot \mu_i^{global}$$
+where the shrinkage weight $\alpha_{i,c} \in [0, 1]$ is governed by:
 $$\alpha_{i,c} = \frac{N_{i,c}}{N_{i,c} + \kappa_0}$$
-- $N_{i,c}$: Total recorded starts of driver $i$ at circuit $c$.
-- $\bar{y}_{i,c}$: Sample mean finishing position of driver $i$ at circuit $c$.
-- $\mu_{i}^{global}$: Overall career mean finishing position of driver $i$.
-- $\kappa_0$: Empirical shrinkage hyperparameter ($\kappa_0 \approx 5.0$).
+- $N_{i,c}$: Total recorded appearances of driver $i$ at circuit $c$.
+- $\bar{y}_{i,c}$: Sample average finishing position (or position delta) of driver $i$ at circuit $c$.
+- $\mu_i^{global}$: Overall career average finishing performance of driver $i$.
+- $\kappa_0$: Empirical Bayes prior precision parameter.
 
-#### Shrinkage Properties:
-- **$N_{i,c} = 1$ (Rookie single appearance):** $\alpha = \frac{1}{1 + 5} = 0.167$. 83.3% of the estimate is anchored to the driver's global capability, preventing overreaction to a single outlier.
-- **$N_{i,c} = 15$ (Veteran track record):** $\alpha = \frac{15}{15 + 5} = 0.750$. 75.0% of the estimate is driven by the circuit track record.
+#### Uncertainty of the Circuit Estimate:
+The posterior variance of the circuit affinity estimate is:
+$$\text{Var}(\widehat{\mu}_{i,c}) = \frac{\sigma_{within}^2}{N_{i,c} + \kappa_0}$$
+This variance is explicitly passed downstream to the ranking engine, ensuring that a rookie's uncertain circuit affinity carries low confidence, whereas a veteran's affinity carries high statistical confidence.
 
-### 4.3 Technical Regulation Era Decay
-Circuit appearances are decayed according to technical era relevance:
-$$w_{era} = \begin{cases} 
-1.00 & \text{Ground Effect (2022–2026)} \\ 
-0.60 & \text{Turbo-Hybrid (2014–2021)} \\ 
-0.25 & \text{V8 Era (2006–2013)} \\ 
-0.10 & \text{Pre-2006} 
-\end{cases}$$
+### 4.2 Empirical Evaluation of Temporal Relevance (Hypothesis Testing)
+Formula 1 technical regulations alter chassis dynamics, tyre behavior, and overtaking characteristics. However, treating discrete regulation eras as rigid, hardcoded constants ($1.0, 0.6, 0.25$) is a subjective heuristic.
 
-### 4.4 Circuit Characteristic Affinity
-PACE matches driver and car performance against the technical attributes in `circuit_characteristics.parquet`:
-- **Street Circuit Affinity:** Track record on low-grip, high-consequence temporary barriers (Monaco, Baku, Singapore, Vegas).
-- **High Altitude Factor:** Aerodynamic density and turbocharger stress (Mexico City at 2,240m elevation vs Zandvoort at sea level).
-- **Overtaking Difficulty Factor:** Track design classifying overtaking feasibility into `Low`, `Medium`, and `High`.
+PACE establishes a formal **chronological backtesting experiment** to test four competing temporal weighting hypotheses:
 
----
+| Hypothesis | Mathematical Formulation | Underlying Assumption |
+| :--- | :--- | :--- |
+| **H1: Continuous Exponential Half-Life** | $w(t - \tau) = \exp\left(-\lambda_{half} \cdot (t - \tau)\right)$ | Performance relevance decays smoothly over time regardless of rule boundaries ($\lambda_{half} \approx 3\text{ years}$). |
+| **H2: Discrete Era Step-Down** | $w(era) \in \{1.00, 0.60, 0.25, 0.10\}$ | Major regulation shifts (e.g. 2022 Ground Effect) reset vehicle physics; historical records across era boundaries lose substantial relevance. |
+| **H3: Hierarchical Random Walk** | $\mu_{i,c}(t) = \mu_{i,c}(t-1) + \eta_t, \quad \eta_t \sim N(0, \sigma_{walk}^2)$ | Circuit affinity evolves dynamically as a latent state space process. |
+| **H4: Era-Invariant Uniform** | $w(t - \tau) = 1.0 \quad \forall \tau$ | Circuit layout geometry and driver track compatibility are intrinsic and invariant across car eras. |
 
-## 5. Context-Dependent Metric Weighting Architecture
-
-### 5.1 Hybrid Domain-Guided & Machine-Learned Weighting
-A central flaw of simplistic prediction models is adopting static, arbitrary weighting formulas (e.g., "always 40% car + 30% qualy + 20% driver + 10% circuit"). In reality:
-- At **Monaco** (Overtaking Difficulty: High, narrow streets), Qualifying Grid Position determines >80% of finishing position outcome.
-- At **Spa-Francorchamps** or **Baku** (Overtaking Difficulty: Low, long DRS straights), Qualifying position accounts for <50% of outcome, and straight-line speed, engine power, and tyre degradation dominate.
-
-PACE addresses this through a **two-tier hybrid weighting architecture**:
-
-```
-                       ┌────────────────────────────────────────────────────────┐
-                       │          Engineering Domain Priors & Bounds            │
-                       │   (Monotonicity, Min/Max Limits, Feature Hierarchy)   │
-                       └──────────────────────────┬─────────────────────────────┘
-                                                  │
-                                                  ▼
-┌───────────────────────┐              ┌──────────────────────┐             ┌─────────────────────────┐
-│     Driver State      │              │   Constructor State  │             │   Circuit & Conditions  │
-│  • Latent DPI Rating  │              │  • Latent CPI Pace   │             │  • Overtaking Difficulty│
-│  • Teammate Deltas    │              │  • Sector Speeds     │             │  • Tyre Stress Rating   │
-│  • Consistency CV     │              │  • Tyre Degradation  │             │  • Altitude & Weather   │
-└───────────┬───────────┘              └──────────┬───────────┘             └────────────┬────────────┘
-            │                                     │                                      │
-            └─────────────────────────────┬───────┴──────────────────────────────────────┘
-                                          │
-                                          ▼
-                       ┌────────────────────────────────────────────────────────┐
-                       │       Context-Aware Non-Linear Interaction Engine      │
-                       │           (XGBoost / LambdaMART Rank Engine)           │
-                       │                                                        │
-                       │  • GridPos × OvertakingDifficulty                      │
-                       │  • TyreDeg × TyreStressRating                          │
-                       │  • TopSpeed × CircuitLength/Altitude                   │
-                       └──────────────────────────┬─────────────────────────────┘
-                                                  │
-                                                  ▼
-                       ┌────────────────────────────────────────────────────────┐
-                       │           Explainable Attribution (SHAP Engine)        │
-                       │    (Quantifies WHY driver is predicted in position)   │
-                       └────────────────────────────────────────────────────────┘
-```
-
-### 5.2 Key Explicit Feature Interactions
-1. $\text{GridPosition} \times \text{OvertakingDifficultyRating}$: Scales the retention probability of the starting position.
-2. $\text{TyreDegradationSlope} \times \text{TyreStressLevel}$: Magnifies car tyre wear penalties on abrasive, high-energy circuits (Barcelona, Silverstone, Suzuka).
-3. $\text{TopSpeedTrap} \times \text{TrackLength} \times \text{Altitude}$: Rewards straight-line efficiency at high-speed and high-altitude circuits (Monza, Mexico City).
-4. $\text{DriverRating} \times \text{PositionsGainedBaseline}$: Empirically predicts how effectively a driver can slice through the field when starting out of position.
-
-### 5.3 Attribution vs. Causality Principle
-PACE strictly enforces that **feature importance metrics (such as SHAP values, Gain, or Permutation Importance) are explanatory attribution tools, NOT causal weights or arbitrary model dials**:
-- SHAP values quantify the marginal contribution of each feature to a specific driver's predicted finishing position score.
-- They explain *why* the model expects Hamilton to finish P2 or Lindblad P10, providing transparent reporting.
+During Phase 3 model validation, all four hypotheses will be evaluated on historical seasons (2023–2026), and the optimal weighting function will be chosen strictly by out-of-sample log-likelihood and rank correlation, not developer intuition.
 
 ---
 
-## 6. Modelling Approaches & Recommended Architecture
+## 5. Complete Race Outcome Space: DNF & Classification Modelling
 
-### 6.1 Evaluation of Candidate Paradigms
+### 5.1 Mutually Exclusive & Exhaustive Outcome Space
+A critical requirement of PACE is that **the probability calculations must represent the complete race outcome space consistently**:
+- A driver cannot be predicted to finish P3 and simultaneously have a 30% probability of retiring without those outcomes being mathematically linked.
+- The outcome space for every driver $i$ in a field of $N$ starters is strictly partitioned into mutually exclusive states:
 
-| Paradigm | Strengths | Limitations | PACE Suitability |
-| :--- | :--- | :--- | :---: |
-| **Linear / Regularised Regression (Ridge / Lasso)** | Highly interpretable, closed-form coefficients. | Incapable of modeling permutation constraints; fails on non-linear interactions; cannot guarantee unique P1–P20 ranks. | Baseline only |
-| **Ordinal Logistic Regression** | Respects ordered nature of positions (P1 > P2 > P3). | Struggles with high-dimensional feature spaces and complex multi-way interactions. | Secondary Baseline |
-| **Standard GBDTs (XGBoost $L_2$ Regressor)** | Excellent tabular accuracy, automatically discovers non-linear interactions. | Treats finishing positions as independent continuous variables; can predict duplicate positions; ignores race-level permutation structure. | Insufficient alone |
-| **Bayesian Hierarchical Skill Models (TrueSkill / Glicko)** | Superb at isolating latent driver skill from paired teammate comparisons; provides uncertainty bounds. | Does not natively ingest real-time session telemetry, sector speeds, or weather interactions. | Core Feature Engine |
-| **Listwise Learning-to-Rank (LambdaMART / XGBoost `rank:pairwise` / `rank:ndcg`)** | Treats each Grand Prix as a structured group; directly optimizes ranking metrics (NDCG, Kendall's Tau); inherently models competition. | Outputs latent ranking scores rather than direct calibrated probabilities. | **Recommended Core** |
+$$\Omega_i = \{ \text{Classified at Position } k \mid k \in [1, N] \} \cup \{ \text{Mechanical DNF} \} \cup \{ \text{Incident DNF} \} \cup \{ \text{DNS} \} \cup \{ \text{DSQ} \}$$
+$$\sum_{k=1}^N P(\text{Classified } k) + P(\text{Mechanical DNF}) + P(\text{Incident DNF}) + P(\text{DNS}) + P(\text{DSQ}) = 1.0$$
 
-### 6.2 Recommended Initial Architecture: Two-Stage Hybrid Ranker
-
-PACE adopts a **Two-Stage Hybrid Predictive Architecture**:
+### 5.2 Two-Stage Joint Outcome Decomposition
+To enforce this consistency, PACE decomposes the probability distribution hierarchically:
 
 ```
-Stage 1: Latent Feature Extractors
-  ├── Glicko-2 Teammate Rating Engine ──> Latent Driver Skill (DPI) & Uncertainty (RD)
-  ├── Constructor Relative Gap Engine ──> Car Base Pace (CPI) & Dev Trajectory
-  ├── FP2 Telemetry Degradation Modeler ─> Tyre Wear Index & Sector Speeds
-  └── Empirical Bayes Track Modeler ─────> Shrinkage Circuit Affinity (DCI)
-                             │
-                             ▼
-Stage 2: Supervised Listwise Ranking Engine
-  ├── Grouped by Event (event_id = season_round)
-  ├── XGBoost LambdaMART / Pairwise Objective (rank:pairwise / rank:ndcg)
-  ├── Inputs: DPI, CPI, DCI, Grid, Practice Telemetry, Circuit Characteristics, Interactions
-  └── Outputs: Continuous Latent Performance Score s_i for each driver i
-                             │
-                             ▼
-Stage 3: Permutation Solver & Calibrated Probability Decomposition
-  ├── Sorting: Order drivers by latent score s_i descending ──> Deterministic P1–P20
-  ├── Plackett-Luce Choice Probability: P(Driver i wins) = exp(s_i) / sum(exp(s_k))
-  └── Binary Mechanical DNF Calibrator (Logistic/Isotonic) ──> DNF Probability
+                                  [ Driver i Starts Race ]
+                                             │
+                       ┌─────────────────────┴─────────────────────┐
+                       ▼                                           ▼
+          [ Classified Finisher ]                        [ Non-Finisher / DNF ]
+          P(Classified) = 1 - P(DNF)                               P(DNF)
+                       │                                           │
+                       ▼                                           ▼
+             [ P1 to P20 Ranking ]                       [ Cause Decomposition ]
+          P(Finish = k | Classified)                  ├── Mechanical Failure: P(Mech)
+       via Plackett-Luce Choice Model                 ├── Collision/Driver Error: P(Inc)
+                                                      └── Disqualification: P(DSQ)
 ```
 
-#### Why This Architecture is Justified:
-1. **Mathematical Consistency:** Grouped listwise ranking guarantees that driver outcomes are modeled relative to the competitors in *that specific race*, not against an abstract absolute scale.
-2. **Deterministic Output Guarantee:** Sorting latent scores $s_i$ mathematically guarantees an internally consistent P1 to P20 finishing classification without ties or duplicate positions.
-3. **Probabilistic Realism:** The Plackett-Luce choice framework converts latent scores into full probability distributions across finishing positions, satisfying PACE's requirement to deliver probabilistic race forecasts.
-4. **Engineering Explainability:** Tree SHAP decomposition on the Stage 2 ranker enables exact attribution for every driver's predicted position.
+#### Stage A: Calibrated Retirement Likelihood ($P(DNF_i)$)
+The probability of driver $i$ failing to finish is modeled using a regularized logistic regression with isotonic probability calibration:
+$$P(DNF_{i,t}) = \sigma\left(\theta_0 + \theta_1 (1 - Rel_{c(i)}) + \theta_2 P_{circuit}^{SC} + \theta_3 Grid_{i,t} + \theta_4 CV_{pace}(i)\right)$$
+- Constructor mechanical unreliability ($1 - Rel_c$) drives mechanical failures.
+- Circuit Safety Car history ($P_{circuit}^{SC}$) and starting in congested midfield zones (Grid P8–P16) drive collision incident risks.
+
+#### Stage B: Conditional Finishing Rank ($P(\text{Rank } k \mid \text{Classified})$)
+Conditioned on being classified, driver relative performance is modeled through a continuous latent score $s_i$ in a **Plackett-Luce choice framework**:
+$$P(\text{Driver } i \text{ finishes ahead of } j \mid \text{both classified}) = \frac{\exp(s_i)}{\exp(s_i) + \exp(s_j)}$$
+The probability that driver $i$ claims finishing position $k$ given the surviving field is computed via forward-backward dynamic programming over the Plackett-Luce permutation space.
+
+#### Stage C: Expected Finishing Position
+The complete expected finishing position combines both branches:
+$$\mathbb{E}[Pos_i] = \sum_{k=1}^{N_{classified}} k \cdot P(\text{Finish } k \mid \text{Classified}) \cdot (1 - P(DNF_i)) + N_{classified} \cdot P(DNF_i)$$
+This guarantees mathematical consistency: high DNF risk automatically penalizes expected championship points and finishing position expectations.
 
 ---
 
-## 7. Chronological Backtesting & Validation Methodology
+## 6. End-to-End Uncertainty Propagation
 
-### 7.1 Prevention of Data Leakage
-Predicting Formula 1 races requires strict adherence to temporal causality:
-- **Zero Future Leakage:** For any race at $(Season, Round)$, models may ONLY train on data from events that occurred strictly prior to $(Season, Round)$.
-- **Zero Label Leakage:** Race results, pit stops, and final classifications from the event being predicted are strictly isolated as target labels.
-- **Session Timestamp Cutoff:** For pre-race predictions, only Friday practice (FP1, FP2, FP3) and Saturday Qualifying data from the current event are accessible.
+To prevent overconfidence, point estimates must not be passed into downstream models in isolation. Every upstream feature module outputs both a central tendency and a dispersion metric:
 
-### 7.2 Walk-Forward Expanding Window Backtesting Design
+1. **Driver Skill:** Enters as $(DPI_{\mu}, DPI_{\sigma})$, where $DPI_{\sigma} = \phi_i$ from Glicko-2 or posterior credible standard error from Hierarchical Bayes.
+2. **Constructor Pace:** Enters as $(CPI_{\mu}, CPI_{\sigma})$, where $CPI_{\sigma}$ reflects pace variance across practice sessions and stint laps.
+3. **Circuit Affinity:** Enters as $(\widehat{\mu}_{i,c}, \text{SE}(\widehat{\mu}_{i,c}))$, carrying Bayesian shrinkage uncertainty.
+4. **Tyre Degradation:** Enters as $(k_{deg}, \text{SE}(k_{deg}))$.
 
-```
-Fold 1: Train [2023 R1 .. 2023 R10] ───────────────> Test on [2023 R11]
-Fold 2: Train [2023 R1 .. 2023 R11] ───────────────> Test on [2023 R12]
-...
-Fold k: Train [2023 R1 .. 2025 R24] ───────────────> Test on [2026 R1]
-...
-Fold N: Train [2023 R1 .. 2026 R19] ───────────────> Test on [2026 R20]
-```
-
-### 7.3 Benchmark Baselines
-Every predictive model in PACE must be evaluated against three standard baselines:
-1. **Qualifying Grid Baseline:** Predicted finish = Starting grid position ($Finish_i = Grid_i$).
-2. **Current Championship Standing Baseline:** Predicted finish = Order in the World Drivers' Championship standings prior to the race.
-3. **Rolling Constructor Baseline:** Predicted finish = Constructor's rolling average finish position over the prior 3 events.
-
-### 7.4 Quantitative Evaluation Metrics
-
-#### A. Rank Correlation & Ordinal Metrics
-- **Spearman Rank Correlation ($\rho$):**
-  $$\rho = 1 - \frac{6 \sum_{i=1}^N d_i^2}{N(N^2 - 1)}$$
-  Measures monotonic ranking alignment across the full field ($-1.0$ to $+1.0$).
-- **Kendall's Tau ($\tau$):** Measures the proportion of concordant vs discordant pairs, penalizing pairwise inversions.
-
-#### B. Position Distance Metrics
-- **Mean Absolute Error (MAE):**
-  $$\text{MAE} = \frac{1}{N} \sum_{i=1}^N \left| \widehat{Pos}_i - Pos_i \right|$$
-  Measures the average number of positions a prediction is off by.
-
-#### C. Threshold Classification Accuracy
-- **Top-1 Accuracy:** Precision on race winner prediction.
-- **Top-3 Podium Accuracy:** Precision, recall, and F1-score on the three podium finishers.
-- **Top-10 Points Accuracy:** Percentage of drivers predicted in the top 10 who actually score championship points.
-
-#### D. Probabilistic Calibration
-When probabilistic outputs are generated:
-- **Brier Score:** Mean squared difference between predicted win/podium probabilities and binary outcomes.
-- **Expected Calibration Error (ECE):** Assesses whether a driver assigned an 80% podium probability achieves a podium 80% of the time across backtested bins.
-
-### 7.5 Sliced Evaluations & Ablation Protocol
-To verify that the model is robust and not overfitting to specific teams or tracks, backtested results must be sliced across:
-- **By Circuit Overtaking Class:** Performance on `High` (Monaco) vs `Low` (Monza, Spa) overtaking difficulty.
-- **By Regulation Era:** Verification that performance holds across the Ground Effect era (2022–2026).
-- **By Grid Tier:** Accuracy on Front-runners (P1–P6), Midfield (P7–P14), and Backmarkers (P15–P22).
-
-#### Ablation Suite:
-PACE will evaluate five progressive model tiers to verify each feature family's value:
-1. **Model A:** Qualifying Grid Order alone.
-2. **Model B:** Model A + Constructor Performance Index (CPI).
-3. **Model C:** Model B + Driver Performance Index (DPI).
-4. **Model D:** Model C + Driver–Circuit Historical Intelligence (DCI).
-5. **Model E:** Full Hybrid Model with non-linear Circuit Topology interactions.
+### Propagation Mechanisms
+- **Feature Level:** Upstream variances enter the ranking model as explicit input columns (e.g. `dpi_uncertainty`, `cpi_pace_std`, `circuit_sample_variance`). This enables tree models to learn conservative split rules when inputs have high variance (e.g. discounting circuit affinity for debutants).
+- **Inference Level (Monte Carlo Permutation Draws):** For probabilistic forecasting, PACE samples $M = 1,000$ draws from the joint posterior:
+  $$s_i^{(m)} \sim N\left(\widehat{s}_i(\mathbf{x}), \Sigma_i(\mathbf{x})\right)$$
+  For each draw $m$, sorting $\{s_1^{(m)}, \dots, s_N^{(m)}\}$ yields a complete, valid race permutation. Aggregating across the $M$ draws generates the full finishing position probability distribution and confidence intervals for every driver.
 
 ---
 
-## 8. Proposed Stage 2 Implementation Plan
+## 7. Context-Dependent Feature Interactions & Attribution Principles
 
-Upon approval of this methodology, Phase 3 Stage 2 implementation will proceed as follows:
+### 7.1 Learned Interactions Guided by Physics Constraints
+PACE rejects rigid, hardcoded weighting percentages (e.g. "40% car, 30% qualy, 20% driver, 10% circuit"). Instead, gradient boosting algorithms learn non-linear interaction surfaces guided by known physical constraints:
 
-1. **Step 1: Feature Engineering Infrastructure (`src/features/`)**
-   - Implement `src/features/dpi.py`: Teammate relative qualifying/race deltas, Glicko-2 rating engine, consistency metrics.
-   - Implement `src/features/cpi.py`: Constructor pace gaps, FP2 degradation slope extractor, reliability indices.
-   - Implement `src/features/driver_circuit.py`: Empirical Bayes shrinkage calculator, circuit affinity vectors.
-   - Implement `src/features/pipeline.py`: Leakage-free feature builder joining all features as of session cutoff.
+1. $\text{QualifyingGridPosition} \times \text{OvertakingDifficultyRating}$:
+   - At high-difficulty tracks (Monaco, Hungaroring, Marina Bay), the model automatically learns that starting position dominates finishing outcome ($> 80\%$ correlation).
+   - At low-difficulty tracks (Spa, Baku, Monza), the model learns that starting position weight diminishes, shifting importance to straight-line speed and race pace.
+2. $\text{TyreDegradationSlope} \times \text{TyreStressRating}$:
+   - A constructor with high tyre wear is penalised severely at Barcelona and Silverstone (high-energy lateral loading), but penalised minimally at Monaco (smooth, traction-limited tarmac).
+3. $\text{TopSpeedTrap} \times \text{TrackLength} \times \text{Altitude}$:
+   - Straight-line speed and turbocharger compressor efficiency dominate at Monza and Mexico City, but have negligible importance at Monaco or Zandvoort.
 
-2. **Step 2: Baseline Models (`src/models/baselines.py`)**
-   - Implement Grid Order Baseline, Championship Standing Baseline, and Rolling Constructor Baseline.
+### 7.2 Rigorous Distinction: SHAP Attribution vs. Causal Weights
+PACE strictly establishes the mathematical interpretation of SHAP (SHapley Additive exPlanations):
 
-3. **Step 3: Machine Learning Ranking Engine (`src/models/ranker.py`)**
-   - Implement XGBoost LambdaMART / Pairwise ranking model.
-   - Implement Plackett-Luce choice probability decomposition.
-   - Implement deterministic P1–P20 permutation constraint solver.
+$$\widehat{f}(\mathbf{x}) = \phi_0 + \sum_{j=1}^M \phi_j(\mathbf{x})$$
 
-4. **Step 4: Chronological Backtesting & Evaluation (`src/evaluation/`)**
-   - Implement `src/evaluation/backtest.py`: Walk-forward expanding window cross-validator.
-   - Implement `src/evaluation/metrics.py`: MAE, Spearman $\rho$, Kendall $\tau$, Top-1/3/10 accuracy, Brier score.
-   - Implement `src/evaluation/explainability.py`: Tree SHAP driver attribution explainer.
-
-5. **Step 5: Testing & Verification (`tests/`)**
-   - Unit tests for feature calculators, shrinkage mathematics, ranker permutation constraints, and backtester leakage guards.
-   - Backtest execution across historical seasons with automated performance benchmark reporting.
+- **What SHAP is:** A local, additive game-theoretic decomposition quantifying how much feature $j$ shifted driver $i$'s predicted latent score away from the dataset base expectation for *that specific race*.
+- **What SHAP is NOT:** SHAP values are **not** causal regression coefficients, nor are they global percentage dials. A high SHAP value for grid position at Monaco does not mean the user can manually dial "grid weight" up or down.
+- **Explainability Role:** SHAP values are used strictly to generate human-readable post-race explanations (e.g. *"Hamilton was predicted P2 because high sector 2 pace (+1.2) and grid position (+2.1) offset tyre degradation (-0.4)"*).
 
 ---
 
-## 9. Conclusion & Sign-Off Request
+## 8. Model Comparison Plan & Candidate Architectures
 
-This methodology establishes a mathematically sound, domain-informed, and leak-free foundation for PACE's performance modeling engine. It avoids arbitrary weighting guesswork, rigorously isolates driver capability from car pace through networked teammate comparisons, stabilizes small-sample circuit history with Bayesian shrinkage, and directly optimizes the competitive finishing order through listwise ranking.
+To ensure the selection of XGBoost LambdaMART is scientifically justified, PACE will benchmark it against a progressive suite of interpretable statistical baselines on **strictly identical chronological splits**:
 
-We submit this Stage 1 methodology for formal approval before proceeding to model implementation in Stage 2.
+```
+[ Tier 1: Non-Parametric Baselines ]
+  ├── B1: Qualifying Grid Order (Finish = Grid)
+  ├── B2: Current Championship Standings Order
+  └── B3: Rolling Constructor 3-Race Average Finish
+
+[ Tier 2: Interpretable Statistical Models ]
+  ├── M1: Regularized Linear Regression (Ridge / Lasso) with position bounds
+  ├── M2: Ordinal Logistic Regression (Proportional Odds Model)
+  └── M3: Bradley-Terry Paired Choice Model with Covariates
+
+[ Tier 3: Hierarchical Bayesian Latent Skill Models ]
+  └── M4: Bayesian Linear Mixed-Effects Model (LMM Driver + Team crossed effects)
+
+[ Tier 4: Supervised Learning-to-Rank GBDTs ]
+  ├── M5: XGBoost Pairwise Ranking (rank:pairwise)
+  └── M6: XGBoost Listwise LambdaMART (rank:ndcg)
+```
+
+### Statistical Significance Protocol
+- All models are evaluated on the expanding window walk-forward dataset (2023–2026).
+- Pairwise model comparisons are tested using **paired Wilcoxon signed-rank tests** and **Diebold-Mariano tests** on per-race MAE and Spearman $\rho$.
+- A complex model (e.g. M6) will only be adopted over an interpretable baseline (e.g. M1 or M3) if it achieves a **statistically significant improvement ($p < 0.01$)** with meaningful effect size ($> 5\%$ reduction in MAE).
+
+---
+
+## 9. Feature Availability Protocol & Leakage Prevention
+
+### 9.1 Temporal Prediction Horizons
+PACE operates under strict, verifiable prediction timestamps:
+
+| Horizon | Prediction Timestamp | Available Features | Strictly Prohibited Data |
+| :--- | :--- | :--- | :--- |
+| **H1: Pre-Weekend** | Thursday 23:59 UTC prior to event | Historical DPI, CPI, Circuit Affinity up to $(t-1)$, circuit characteristics, regulation era. | Any practice telemetry, qualifying results, race results. |
+| **H2: Post-Friday Practice** | Friday 23:59 UTC (after FP2) | All H1 features + FP1/FP2 sector split times, trap speeds, practice stint degradation slopes. | Saturday FP3, Qualifying results, race results. |
+| **H3: Post-Qualifying (Primary)**| Saturday 23:59 UTC (after Qualy) | All H2 features + FP3 times, official Q1/Q2/Q3 qualifying times, final confirmed starting grid. | Sunday race results, race lap times, race pit stops, race weather. |
+
+### 9.2 Missing Data & Sensor Dropout Protocols
+- **Sprint Weekends:** Feature builders detect sprint schedules (only 1 practice session before competitive sessions). Degradation models automatically adjust sample sizes and widen uncertainty $\text{SE}(k_{deg})$.
+- **Wet Practice Sessions:** If rain invalidates dry telemetry, practice stint pace is masked, and the model automatically falls back to prior dry CPI baselines with widened credible intervals.
+- **Grid Penalties:** Official starting grid positions are ingested post-penalties (engine changes, gearbox penalties, impeding infractions) to reflect the true physical grid.
+
+---
+
+## 10. Unresolved Limitations & Engineering Risks
+
+PACE explicitly acknowledges physical and operational realities that cannot be eliminated by statistical modeling:
+1. **Unobservable Engine Modes & Engine Saving:** Teams operate secretive engine power modes (e.g. "Strat mode", "Party mode", "Engine 1"). A car cruising in FP2 may unleash 25 additional horsepower in Qualifying and Race trim without prior telemetry warning.
+2. **Fuel Load Secrecy:** Friday practice run plans are proprietary. While PACE's latent stint-clustering isolates fuel trends, exact onboard mass remains unobservable.
+3. **First-Lap Chaos & Collision Stochasticity:** No statistical model can predict whether an over-ambitious divebomb at Turn 1 will eliminate a front-row starter. Incident risks are fundamentally probabilistic, not deterministic.
+4. **Dynamic Weather Transitions:** Sudden mid-race rain showers transform race pace into tyre crossover strategy gambles. Pre-race predictions cannot foresee the exact minute a rain cell hits.
+
+---
+
+## 11. Conclusion & Sign-Off Request
+
+This revised methodology incorporates all requested refinements:
+- Fully accounts for teammate comparison confounders.
+- Rigorously distinguishes directly measured telemetry from inferred vehicle properties.
+- Eliminates hardcoded fuel burn-off assumptions in favor of circuit-specific latent estimation.
+- Formulates regulation-era relevance as testable scientific hypotheses.
+- Decouples driver experience from underlying talent.
+- Unifies classified positions, mechanical retirements, and incident DNFs into a complete, sum-to-one outcome space.
+- Propagates posterior uncertainty end-to-end.
+- Establishes a rigorous multi-model comparison protocol before selecting machine learning algorithms.
+
+We present this revised specification for final sign-off before commencing Phase 3 Stage 2 implementation.
