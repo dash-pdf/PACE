@@ -145,11 +145,16 @@ class HistoricalDataPipeline:
             ("practice_laps", PRACTICE_LAPS_SCHEMA),
         ]
 
+        # Compile across all seasons present in data/processed
+        processed_dir = self.base_dir / "data" / "processed"
+        discovered_seasons = [int(p.name) for p in processed_dir.glob("*") if p.is_dir() and p.name.isdigit()]
+        all_compile_seasons = sorted(list(set(self.seasons + discovered_seasons)))
+
         compiled_counts: Dict[str, int] = {}
         for cat, schema in categories:
             compiled_path = compile_historical_dataset(
                 cat,
-                self.seasons,
+                all_compile_seasons,
                 schema=schema,
                 base_dir=self.base_dir,
             )

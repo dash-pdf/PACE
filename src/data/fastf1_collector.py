@@ -30,6 +30,7 @@ from src.data.storage import (
     save_raw_json,
     save_parquet,
     get_processed_path,
+    get_raw_path,
     dataset_exists,
 )
 
@@ -116,6 +117,31 @@ class FastF1Collector:
         if self.request_delay > 0:
             time.sleep(self.request_delay)
 
+    def _safe_call(self, func, *args, **kwargs):
+        """Execute Ergast API request with retry and exponential backoff on HTTP 429/rate limits."""
+        max_retries = 6
+        base_backoff = 2.0
+        for attempt in range(max_retries):
+            self._sleep()
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                err_str = str(e).lower()
+                is_rate_limit = "429" in err_str or "too many requests" in err_str or "rate limit" in err_str
+                is_transient = is_rate_limit or "connection" in err_str or "timeout" in err_str or "reset" in err_str
+
+                if is_transient and attempt < max_retries - 1:
+                    sleep_time = base_backoff * (2 ** attempt)
+                    logger.warning(
+                        f"Transient Ergast API error for {func.__name__} ({e}). "
+                        f"Sleeping {sleep_time:.1f}s before retry {attempt + 1}/{max_retries}..."
+                    )
+                    time.sleep(sleep_time)
+                else:
+                    logger.warning(f"Ergast call {func.__name__} failed on attempt {attempt + 1}: {e}")
+                    raise
+        return None
+
     def collect_drivers(self, season: int, force: bool = False) -> pd.DataFrame:
         """Collect driver biographies and metadata for a given season."""
         processed_path = get_processed_path("drivers", season)
@@ -124,8 +150,7 @@ class FastF1Collector:
             return pd.read_parquet(processed_path)
 
         logger.info(f"Fetching drivers for season {season}...")
-        self._sleep()
-        resp = self.ergast.get_driver_info(season=season)
+        resp = self._safe_call(self.ergast.get_driver_info, season=season)
         df_raw = extract_df(resp)
 
         records = []
@@ -167,8 +192,7 @@ class FastF1Collector:
             return pd.read_parquet(processed_path)
 
         logger.info(f"Fetching constructors for season {season}...")
-        self._sleep()
-        resp = self.ergast.get_constructor_info(season=season)
+        resp = self._safe_call(self.ergast.get_constructor_info, season=season)
         df_raw = extract_df(resp)
 
         records = []
@@ -201,8 +225,7 @@ class FastF1Collector:
             return pd.read_parquet(processed_path)
 
         logger.info(f"Fetching circuits for season {season}...")
-        self._sleep()
-        resp = self.ergast.get_circuits(season=season)
+        resp = self._safe_call(self.ergast.get_circuits, season=season)
         df_raw = extract_df(resp)
 
         records = []
@@ -242,8 +265,7 @@ class FastF1Collector:
             return pd.read_parquet(events_path), pd.read_parquet(sessions_path)
 
         logger.info(f"Fetching event schedule for season {season}...")
-        self._sleep()
-        resp = self.ergast.get_race_schedule(season=season)
+        resp = self._safe_call(self.ergast.get_race_schedule, season=season)
         sched = extract_df(resp)
 
         event_records = []
@@ -319,16 +341,28 @@ class FastF1Collector:
 
         for rnd in rounds:
             logger.info(f"Fetching race results: {season} Round {rnd}...")
-            self._sleep()
-            try:
-                resp = self.ergast.get_race_results(season=season, round=rnd)
-                df_round = extract_df(resp)
-                if df_round.empty:
-                    logger.info(f"Round {rnd} has no race results yet. Skipping.")
-                    continue
-                save_raw_json(df_round.to_dict(orient="records"), "race_results", season, f"round_{rnd}_race.json")
+            raw_path = get_raw_path("race_results", season, f"round_{rnd}_race.json")
+            df_round = pd.DataFrame()
+            if not force and raw_path.exists():
+                try:
+                    with open(raw_path, "r", encoding="utf-8") as f:
+                        df_round = pd.DataFrame(json.load(f))
+                except Exception:
+                    df_round = pd.DataFrame()
 
-                for _, row in df_round.iterrows():
+            if df_round.empty:
+                try:
+                    resp = self._safe_call(self.ergast.get_race_results, season=season, round=rnd)
+                    df_round = extract_df(resp)
+                    if df_round.empty:
+                        logger.info(f"Round {rnd} has no race results yet. Skipping.")
+                        continue
+                    save_raw_json(df_round.to_dict(orient="records"), "race_results", season, f"round_{rnd}_race.json")
+                except Exception as e:
+                    logger.warning(f"Error fetching race results for {season} Round {rnd}: {e}")
+                    continue
+
+            for _, row in df_round.iterrows():
                     pos_raw = row.get("position")
                     pos = int(pos_raw) if pd.notna(pos_raw) and str(pos_raw).isdigit() else -1
                     pos_text = str(row.get("positionText", ""))
@@ -367,8 +401,6 @@ class FastF1Collector:
                         "source_api": "fastf1.ergast",
                         "retrieved_at": now,
                     })
-            except Exception as e:
-                logger.warning(f"Error fetching race results for {season} Round {rnd}: {e}")
 
         df = pd.DataFrame(records, columns=RACE_RESULTS_SCHEMA.names)
         save_parquet(df, processed_path, schema=RACE_RESULTS_SCHEMA)
@@ -391,15 +423,27 @@ class FastF1Collector:
 
         for rnd in rounds:
             logger.info(f"Fetching qualifying results: {season} Round {rnd}...")
-            self._sleep()
-            try:
-                resp = self.ergast.get_qualifying_results(season=season, round=rnd)
-                df_round = extract_df(resp)
-                if df_round.empty:
-                    continue
-                save_raw_json(df_round.to_dict(orient="records"), "qualifying", season, f"round_{rnd}_qualifying.json")
+            raw_path = get_raw_path("qualifying", season, f"round_{rnd}_qualifying.json")
+            df_round = pd.DataFrame()
+            if not force and raw_path.exists():
+                try:
+                    with open(raw_path, "r", encoding="utf-8") as f:
+                        df_round = pd.DataFrame(json.load(f))
+                except Exception:
+                    df_round = pd.DataFrame()
 
-                for _, row in df_round.iterrows():
+            if df_round.empty:
+                try:
+                    resp = self._safe_call(self.ergast.get_qualifying_results, season=season, round=rnd)
+                    df_round = extract_df(resp)
+                    if df_round.empty:
+                        continue
+                    save_raw_json(df_round.to_dict(orient="records"), "qualifying", season, f"round_{rnd}_qualifying.json")
+                except Exception as e:
+                    logger.warning(f"Error fetching qualifying results for {season} Round {rnd}: {e}")
+                    continue
+
+            for _, row in df_round.iterrows():
                     pos_raw = row.get("position")
                     pos = int(pos_raw) if pd.notna(pos_raw) and str(pos_raw).isdigit() else -1
 
@@ -424,8 +468,6 @@ class FastF1Collector:
                         "source_api": "fastf1.ergast",
                         "retrieved_at": now,
                     })
-            except Exception as e:
-                logger.warning(f"Error fetching qualifying results for {season} Round {rnd}: {e}")
 
         df = pd.DataFrame(records, columns=QUALIFYING_RESULTS_SCHEMA.names)
         save_parquet(df, processed_path, schema=QUALIFYING_RESULTS_SCHEMA)
@@ -447,15 +489,27 @@ class FastF1Collector:
         now = get_iso_timestamp()
 
         for rnd in rounds:
-            self._sleep()
-            try:
-                resp = self.ergast.get_sprint_results(season=season, round=rnd)
-                df_round = extract_df(resp)
-                if df_round.empty:
-                    continue
-                save_raw_json(df_round.to_dict(orient="records"), "sprints", season, f"round_{rnd}_sprint.json")
+            raw_path = get_raw_path("sprints", season, f"round_{rnd}_sprint.json")
+            df_round = pd.DataFrame()
+            if not force and raw_path.exists():
+                try:
+                    with open(raw_path, "r", encoding="utf-8") as f:
+                        df_round = pd.DataFrame(json.load(f))
+                except Exception:
+                    df_round = pd.DataFrame()
 
-                for _, row in df_round.iterrows():
+            if df_round.empty:
+                try:
+                    resp = self._safe_call(self.ergast.get_sprint_results, season=season, round=rnd)
+                    df_round = extract_df(resp)
+                    if df_round.empty:
+                        continue
+                    save_raw_json(df_round.to_dict(orient="records"), "sprints", season, f"round_{rnd}_sprint.json")
+                except Exception as e:
+                    logger.warning(f"Error checking sprint results for {season} Round {rnd}: {e}")
+                    continue
+
+            for _, row in df_round.iterrows():
                     pos_raw = row.get("position")
                     pos = int(pos_raw) if pd.notna(pos_raw) and str(pos_raw).isdigit() else -1
                     pos_text = str(row.get("positionText", ""))
@@ -491,8 +545,6 @@ class FastF1Collector:
                         "source_api": "fastf1.ergast",
                         "retrieved_at": now,
                     })
-            except Exception as e:
-                logger.warning(f"Error checking sprint results for {season} Round {rnd}: {e}")
 
         df = pd.DataFrame(records, columns=SPRINT_RESULTS_SCHEMA.names)
         save_parquet(df, processed_path, schema=SPRINT_RESULTS_SCHEMA)
@@ -525,7 +577,7 @@ class FastF1Collector:
             self._sleep()
             # 1. Lap times
             try:
-                lap_resp = self.ergast.get_lap_times(season=season, round=rnd, limit=max_laps_per_round)
+                lap_resp = self._safe_call(self.ergast.get_lap_times, season=season, round=rnd, limit=max_laps_per_round)
                 df_laps = extract_df(lap_resp)
                 if not df_laps.empty:
                     save_raw_json(df_laps.to_dict(orient="records"), "laps", season, f"round_{rnd}_laps.json")
@@ -546,9 +598,8 @@ class FastF1Collector:
                 logger.warning(f"Error fetching lap times for {season} Round {rnd}: {e}")
 
             # 2. Pit stops
-            self._sleep()
             try:
-                pit_resp = self.ergast.get_pit_stops(season=season, round=rnd)
+                pit_resp = self._safe_call(self.ergast.get_pit_stops, season=season, round=rnd)
                 df_pits = extract_df(pit_resp)
                 if not df_pits.empty:
                     save_raw_json(df_pits.to_dict(orient="records"), "pit_stops", season, f"round_{rnd}_pits.json")
