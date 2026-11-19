@@ -87,9 +87,9 @@ PACE is structured around seven analytical engines:
 | Phase | Milestone | Status | Description |
 | :---: | :--- | :---: | :--- |
 | **Phase 1** | **Repository Creation & Project Foundation** | **Completed** | Project scaffolding, licensing, Git repository setup, virtual environment, and dependency configuration. |
-| **Phase 2** | **Historical Data Infrastructure** | Planned | Ingestion pipelines for historical race results, lap times, weather records, and circuit characteristics. |
-| **Phase 3** | **Telemetry & Session Data Ingestion** | Planned | Integration of practice/qualifying telemetry, sector times, tyre compound metrics, and fuel corrections. |
-| **Phase 4** | **Feature Engineering Pipeline** | Planned | Calculation of driver form ratings, car performance indices, and circuit compatibility vectors. |
+| **Phase 2** | **Historical Data Infrastructure** | **Completed** | Robust data ingestion, raw/processed Parquet storage, multi-season compilation (2023–2026), and quality validation gates. |
+| **Phase 3** | **Driver & Constructor Performance Modelling** | Planned | Baseline performance indices, rolling driver form, car developmental trajectory, and telemetry analysis. |
+| **Phase 4** | **Feature Engineering Pipeline** | Planned | Calculation of driver form ratings, car performance indices, tyre degradation curves, and circuit compatibility vectors. |
 | **Phase 5** | **Baseline & Machine Learning Models** | Planned | Implementation of baseline heuristics, regression models, and gradient-boosted ranking algorithms. |
 | **Phase 6** | **Stochastic Race Simulation Engine** | Planned | Monte Carlo simulation modelling tyre wear, pit stops, safety car periods, and stochastic incidents. |
 | **Phase 7** | **Evaluation & Backtesting Framework** | Planned | Historical backtesting, calibration assessment, and predictive accuracy metrics. |
@@ -99,13 +99,16 @@ PACE is structured around seven analytical engines:
 
 ## 7. Current Development Status
 
-- **Current Phase:** Phase 1 (Repository Creation & Project Foundation)
+- **Current Phase:** Phase 2 (Historical Data Infrastructure) — Completed
 - **Implemented Functionality:**
-  - Standard directory architecture and module structure.
-  - Initial configuration files, package manifests (`requirements.txt`), and test fixtures.
-  - Version control configuration with sensitive data exclusions.
+  - Automated data ingestion for seasons 2023–2026 using FastF1 Ergast API and OpenF1 feeds.
+  - Three-tier storage architecture (`data/raw/`, `data/processed/`, `data/historical/`) with Parquet compression.
+  - Comprehensive schemas covering drivers, constructors, circuits, events, sessions, qualifying, race results, sprints, laps, pit stops, and practice runs.
+  - Automated quality validation gates verifying referential integrity, position validity, DNF/DNS/DSQ status flags, and coordinate ranges.
+  - Command-line interface with `--collect-data`, `--validate-data`, `--seasons`, and `--force` support.
+  - Comprehensive test suite with 17 unit/integration tests verifying schemas, storage, and validation gates.
 - **Planned Functionality:**
-  - Prediction models, simulation engines, and data ingestion pipelines have not yet been implemented; they are scheduled for subsequent roadmap phases.
+  - Prediction models, driver ratings, and simulation engines will be built on top of this infrastructure in Phase 3 onwards.
 
 ---
 
@@ -135,10 +138,20 @@ PACE is structured around seven analytical engines:
    pip install -r requirements.txt
    ```
 
-4. **Verify installation:**
+4. **Verify installation & run test suite:**
    ```bash
    pytest
    python main.py --status
+   ```
+
+5. **Execute historical data collection:**
+   ```bash
+   python main.py --collect-data
+   ```
+
+6. **Validate dataset quality gates:**
+   ```bash
+   python main.py --validate-data
    ```
 
 ---
