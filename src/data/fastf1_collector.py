@@ -92,13 +92,20 @@ def classify_status(status_str: str, position_text: str = "") -> Tuple[bool, boo
     s = (status_str or "").strip().lower()
     p = (position_text or "").strip().upper()
 
-    if p == "D" or "disqualif" in s:
+    if p == "D" or "disqualif" in s or "dsq" in s:
         return False, False, False, True
 
     if p == "W" or "did not start" in s or "dns" in s or "withdrew" in s:
         return False, False, True, False
 
-    if s.startswith("finished") or "+ lap" in s or "+ laps" in s or s.startswith("+"):
+    # Classified finishes: Finished, Lapped (+1 Lap, +2 Laps, Lapped)
+    if (
+        s.startswith("finished")
+        or "+ lap" in s
+        or "+ laps" in s
+        or s.startswith("+")
+        or "lapped" in s
+    ):
         return True, False, False, False
 
     # Any other status is a retirement / DNF

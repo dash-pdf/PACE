@@ -325,24 +325,30 @@ def main() -> int:
         p_dnf = dnf_model.predict_p_dnf(event_df)
         utilities = ranker.predict_utilities(X_event)
         reliabilities = event_df["cpi_reliability"].values
-        outcomes = CompleteOutcomeSpaceEngine.compute_complete_distribution(utilities, p_dnf, reliabilities)
+        outcomes = CompleteOutcomeSpaceEngine.compute_complete_distribution(
+            utilities, p_dnf, reliabilities, n_draws=10000
+        )
 
         event_df = event_df.assign(
             predicted_rank=predicted_ranks,
             p_dnf=p_dnf,
             expected_pos=[o["expected_position"] for o in outcomes],
-            rank_p05=np.percentile(posterior_draws, 5, axis=0),
-            rank_p95=np.percentile(posterior_draws, 95, axis=0),
+            expected_classified=[o["expected_classified_position"] for o in outcomes],
+            rank_p05=[o["rank_p05"] for o in outcomes],
+            rank_p95=[o["rank_p95"] for o in outcomes],
+            p_win=[o["p_win"] for o in outcomes],
+            p_podium=[o["p_podium"] for o in outcomes],
         )
 
         sorted_df = event_df.sort_values("predicted_rank")
 
-        print("\n" + "=" * 105)
+        print("\n" + "=" * 125)
         print(f"PACE RACE PREDICTION & OUTCOME DISTRIBUTION: SEASON {args.target_season} ROUND {args.target_round}")
-        print("=" * 105)
+        print("=" * 125)
         display_cols = [
             "predicted_rank", "driver_id", "constructor_id", "grid_position",
-            "rank_p05", "rank_p95", "expected_pos", "p_dnf", "finish_position",
+            "rank_p05", "rank_p95", "expected_classified", "expected_pos",
+            "p_win", "p_podium", "p_dnf", "finish_position",
         ]
         print(sorted_df[display_cols].to_string(index=False))
 

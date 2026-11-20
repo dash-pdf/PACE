@@ -155,13 +155,17 @@ class XGBoostLambdaMARTRanker:
         X: pd.DataFrame,
         n_draws: int = 1000,
         uncertainty_scale: float = 0.15,
+        random_seed: int = 42,
     ) -> np.ndarray:
         """Sample M permutations from the predictive posterior distribution.
         
-        Perturbs base utilities using feature-level standard errors (dpi_uncertainty, circuit_se).
+        Combines model utility predictions with feature-level epistemic uncertainty
+        and Plackett-Luce Gumbel choice stochasticity to draw valid permutation realizations.
+        
         Returns:
             permutations: Matrix of shape (n_draws, n_drivers) with 1-indexed ranks.
         """
+        rng = np.random.RandomState(random_seed)
         base_utilities = self.predict_utilities(X)
         n_drivers = len(base_utilities)
 
@@ -175,8 +179,10 @@ class XGBoostLambdaMARTRanker:
 
         draws = np.empty((n_draws, n_drivers), dtype=int)
         for m in range(n_draws):
-            perturbation = np.random.normal(0.0, se_scale, size=n_drivers)
-            draw_utilities = base_utilities + perturbation
+            epistemic_noise = rng.normal(0.0, se_scale, size=n_drivers)
+            u_gumbel = rng.uniform(1e-10, 1.0 - 1e-10, size=n_drivers)
+            gumbel_noise = -np.log(-np.log(u_gumbel))
+            draw_utilities = base_utilities + epistemic_noise + gumbel_noise
             draws[m] = RankPermutationSolver.solve(draw_utilities, ascending=False)
 
         return draws

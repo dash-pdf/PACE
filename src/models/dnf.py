@@ -92,74 +92,138 @@ class CompleteOutcomeSpaceEngine:
         reliabilities: np.ndarray,
         p_dns: float = 0.005,
         p_dsq: float = 0.002,
+        n_draws: int = 10000,
+        random_seed: int = 42,
     ) -> List[Dict[str, float]]:
         """Compute complete outcome distribution for each driver in the field.
         
         Guarantees that for each driver:
             sum_{k=1}^N P(Classified k) + P(Mech DNF) + P(Inc DNF) + P(DNS) + P(DSQ) = 1.0.
+        Also guarantees across all drivers:
+            sum_{i=1}^N P(Finish_i = k) = 1.0 for every position k in 1..N.
         """
         n = len(utilities)
-        results = []
+        if n == 0:
+            return []
 
-        # Softmax utilities for Plackett-Luce choice probabilities
-        # Normalize utilities to prevent numerical overflow
-        exp_u = np.exp(utilities - np.max(utilities))
-        sum_exp_u = np.sum(exp_u)
-        p_win_classified = exp_u / sum_exp_u
+        rng = np.random.RandomState(random_seed)
+
+        # Decompose DNF into mechanical vs incident for each driver
+        p_mech_arr = np.zeros(n)
+        p_inc_arr = np.zeros(n)
+        p_classified_arr = np.zeros(n)
 
         for i in range(n):
             p_retire = float(p_dnf[i])
             rel = float(reliabilities[i]) if i < len(reliabilities) else 0.90
-
-            # Decompose DNF into mechanical vs incident
-            # Higher unreliability -> higher share of mechanical failure
             unreliability = max(1.0 - rel, 0.02)
             mech_share = unreliability / (unreliability + 0.08)
-            p_mech = p_retire * mech_share
-            p_incident = p_retire * (1.0 - mech_share)
+            p_mech_arr[i] = p_retire * mech_share
+            p_inc_arr[i] = p_retire * (1.0 - mech_share)
+            p_classified_arr[i] = max(1.0 - (p_mech_arr[i] + p_inc_arr[i] + p_dns + p_dsq), 0.01)
 
-            # Net classified probability
-            p_classified_total = max(1.0 - (p_mech + p_incident + p_dns + p_dsq), 0.01)
+        # Re-normalize to ensure exact 1.0 sum per driver
+        total_non_class = p_mech_arr + p_inc_arr + p_dns + p_dsq
+        p_classified_arr = 1.0 - total_non_class
 
-            # Position probabilities among classified finishers (P1 to P_N)
-            # We approximate the Plackett-Luce marginal distribution centered on expected rank
+        # Joint Monte Carlo permutation simulation (Gumbel-max Plackett-Luce)
+        positions = np.zeros((n_draws, n), dtype=int)
+        classified_positions = np.zeros((n_draws, n), dtype=float)
+        classified_positions[:] = np.nan
+
+        # Pre-generate uniform draws for outcome states
+        u_rand = rng.uniform(0.0, 1.0, size=(n_draws, n))
+
+        thresh_dns = p_dns
+        thresh_dsq = thresh_dns + p_dsq
+        thresh_mech = thresh_dsq + p_mech_arr
+        thresh_inc = thresh_mech + p_inc_arr
+
+        for m in range(n_draws):
+            u_m = u_rand[m]
+            is_dns = u_m < thresh_dns
+            is_dsq = (u_m >= thresh_dns) & (u_m < thresh_dsq)
+            is_mech = (u_m >= thresh_dsq) & (u_m < thresh_mech)
+            is_inc = (u_m >= thresh_mech) & (u_m < thresh_inc)
+            is_class = ~(is_dns | is_dsq | is_mech | is_inc)
+
+            class_idx = np.where(is_class)[0]
+            C = len(class_idx)
+
+            if C > 0:
+                # Plackett-Luce choice via Gumbel-max
+                u_gumbel = rng.uniform(1e-10, 1.0 - 1e-10, size=C)
+                gumbel_noise = -np.log(-np.log(u_gumbel))
+                pl_scores = utilities[class_idx] + gumbel_noise
+                ord_class = class_idx[np.argsort(-pl_scores)]
+
+                for r_pos, d_idx in enumerate(ord_class, 1):
+                    positions[m, d_idx] = r_pos
+                    classified_positions[m, d_idx] = r_pos
+
+            non_class_idx = np.where(~is_class)[0]
+            if len(non_class_idx) > 0:
+                rng.shuffle(non_class_idx)
+                for r_pos, d_idx in enumerate(non_class_idx, C + 1):
+                    positions[m, d_idx] = r_pos
+
+        results = []
+        for i in range(n):
+            driver_class_positions = classified_positions[:, i]
+            valid_class_mask = ~np.isnan(driver_class_positions)
+            n_class_draws = np.sum(valid_class_mask)
+
+            # Classified position distribution (length n)
             pos_probs = np.zeros(n)
-            # Driver's expected classified position
-            exp_rank = (1.0 - p_win_classified[i]) * (n - 1) + 1.0
+            for k in range(1, n + 1):
+                # P(Classified and Position == k)
+                pos_probs[k - 1] = np.mean(driver_class_positions == k)
 
-            # Discretized bell-curve distribution across positions 1..N
-            k_indices = np.arange(1, n + 1)
-            raw_weights = np.exp(-0.5 * ((k_indices - exp_rank) / 2.5) ** 2)
-            raw_weights /= np.sum(raw_weights)
+            # Re-scale empirical classified counts to exact analytical p_classified_arr[i]
+            sum_emp = np.sum(pos_probs)
+            if sum_emp > 0:
+                pos_probs = (pos_probs / sum_emp) * p_classified_arr[i]
+            else:
+                pos_probs = np.full(n, p_classified_arr[i] / n)
 
-            # Scale by total classified probability
-            pos_probs = raw_weights * p_classified_total
+            p_classified_total = float(p_classified_arr[i])
+            p_mech = float(p_mech_arr[i])
+            p_incident = float(p_inc_arr[i])
 
-            # Expected finish position
-            expected_pos = float(np.sum(k_indices * pos_probs) + n * (p_retire + p_dns + p_dsq))
+            # Expected positions
+            unconditional_expected_pos = float(np.mean(positions[:, i]))
+            if n_class_draws > 0:
+                expected_class_pos = float(np.mean(driver_class_positions[valid_class_mask]))
+                idx_05 = int(np.percentile(driver_class_positions[valid_class_mask], 5))
+                idx_95 = int(np.percentile(driver_class_positions[valid_class_mask], 95))
+            else:
+                expected_class_pos = float(n)
+                idx_05 = n
+                idx_95 = n
 
-            # Shannon entropy of classified finishing distribution H(P)
+            # Shannon entropy of classified distribution
             valid_p = pos_probs[pos_probs > 1e-12]
             entropy = float(-np.sum(valid_p * np.log2(valid_p))) if len(valid_p) > 0 else 0.0
 
-            # 90% credible intervals (P05 and P95) from cumulative distribution
-            cum_p = np.cumsum(pos_probs) / max(p_classified_total, 1e-6)
-            idx_05 = int(np.searchsorted(cum_p, 0.05)) + 1
-            idx_95 = int(np.searchsorted(cum_p, 0.95)) + 1
-
             driver_outcome = {
-                "p_classified_total": float(p_classified_total),
-                "p_mech_dnf": float(p_mech),
-                "p_incident_dnf": float(p_incident),
+                "p_classified_total": p_classified_total,
+                "p_mech_dnf": p_mech,
+                "p_incident_dnf": p_incident,
                 "p_dns": float(p_dns),
                 "p_dsq": float(p_dsq),
-                "expected_position": expected_pos,
+                "expected_position": unconditional_expected_pos,
+                "expected_classified_position": expected_class_pos,
                 "position_distribution": pos_probs.tolist(),
                 "distribution_entropy": entropy,
-                "rank_p05": min(idx_05, n),
-                "rank_p95": min(idx_95, n),
+                "rank_p05": max(1, min(idx_05, n)),
+                "rank_p95": max(1, min(idx_95, n)),
+                "rank_p05_unconditional": int(np.percentile(positions[:, i], 5)),
+                "rank_p95_unconditional": int(np.percentile(positions[:, i], 95)),
+                "p_win": float(np.mean(positions[:, i] == 1)),
+                "p_podium": float(np.mean(positions[:, i] <= 3)),
+                "p_top10": float(np.mean(positions[:, i] <= 10)),
                 "sum_total": float(np.sum(pos_probs) + p_mech + p_incident + p_dns + p_dsq),
-                "note_multi_car": "Marginal baseline probability; joint collision clustering & safety car cascade simulated in Phase 4.",
+                "note_multi_car": "Joint Plackett-Luce Gumbel-max choice simulation with empirical DNF outcome partition.",
             }
             results.append(driver_outcome)
 
