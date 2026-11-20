@@ -13,7 +13,7 @@ from __future__ import annotations
 import math
 from typing import Dict, List, Optional
 import pandas as pd
-from src.simulation.state import CarState, CarStatus, RaceState
+from src.simulation.state import CarState, CarStatus, RaceState, TrackCondition
 
 
 class FIAClassificationEngine:
@@ -52,6 +52,19 @@ class FIAClassificationEngine:
 
         # 90% threshold for classification (FIA Sporting Code Article 54.1)
         min_classified_laps = math.floor(0.90 * winner_laps) if winner_laps > 0 else 0
+
+        # Enforce FIA Article 30.5: Mandatory use of at least 2 distinct dry compounds in dry race
+        # Exception: Waived if wet track condition (Damp/Wet) or if any intermediate/wet compound used
+        is_wet_race = race.track_condition in (TrackCondition.DAMP, TrackCondition.WET)
+
+        for car in all_cars:
+            if car.status in (CarStatus.ACTIVE, CarStatus.FINISHED):
+                has_wet_compound = any(c in ("intermediate", "wet") for c in car.compounds_used)
+                if not is_wet_race and not has_wet_compound:
+                    dry_compounds = {c for c in car.compounds_used if c in ("soft", "medium", "hard")}
+                    # Only enforce if car actually completed at least 20 laps (avoid penalising early retirements)
+                    if len(dry_compounds) < 2 and car.laps_completed >= min_classified_laps:
+                        car.status = CarStatus.DSQ
 
         # Partition cars into buckets
         classified_cars: List[CarState] = []
@@ -116,6 +129,8 @@ class FIAClassificationEngine:
                 "constructor_id": car.constructor_id,
                 "grid_position": car.grid_position,
                 "laps_completed": car.laps_completed,
+                "pit_stops": car.pit_stops_count,
+                "compounds": "/".join(sorted(car.compounds_used)),
                 "elapsed_time": round(total_time, 3),
                 "time_penalties": car.penalties_accrued,
                 "is_classified": is_class,

@@ -84,16 +84,16 @@ def test_fia_classification_90_percent_rule():
         base_lap_time=90.0,
     )
 
-    # Winner completes 50 laps
-    c_winner = CarState("verstappen", "red_bull", 1, 1, elapsed_time=4500.0, laps_completed=50)
+    # Winner completes 50 laps with mandatory 2 compounds
+    c_winner = CarState("verstappen", "red_bull", 1, 1, elapsed_time=4500.0, laps_completed=50, compounds_used={"medium", "hard"})
     # Lead lap finisher
-    c_p2 = CarState("norris", "mclaren", 2, 2, elapsed_time=4503.2, laps_completed=50)
+    c_p2 = CarState("norris", "mclaren", 2, 2, elapsed_time=4503.2, laps_completed=50, compounds_used={"medium", "hard"})
     # Lapped finisher (-1 lap = 49 laps >= 45 laps threshold)
-    c_p3 = CarState("albon", "williams", 10, 3, elapsed_time=4480.0, laps_completed=49)
+    c_p3 = CarState("albon", "williams", 10, 3, elapsed_time=4480.0, laps_completed=49, compounds_used={"medium", "hard"})
     # Retired car on lap 46 (46 >= 45 laps -> classified finisher despite retirement!)
-    c_ret_late = CarState("sainz", "williams", 5, 4, elapsed_time=4200.0, laps_completed=46, status=CarStatus.DNF_MECHANICAL)
+    c_ret_late = CarState("sainz", "williams", 5, 4, elapsed_time=4200.0, laps_completed=46, status=CarStatus.DNF_MECHANICAL, compounds_used={"medium", "hard"})
     # Retired car on lap 20 (< 45 laps -> unclassified DNF)
-    c_ret_early = CarState("gasly", "alpine", 15, 5, elapsed_time=1800.0, laps_completed=20, status=CarStatus.DNF_INCIDENT)
+    c_ret_early = CarState("gasly", "alpine", 15, 5, elapsed_time=1800.0, laps_completed=20, status=CarStatus.DNF_INCIDENT, compounds_used={"medium"})
 
     race.cars = {
         "verstappen": c_winner,

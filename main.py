@@ -447,7 +447,7 @@ def main() -> int:
         print("=" * 110)
         display_cols = [
             "finish_position", "driver_id", "constructor_id", "grid_position",
-            "laps_completed", "elapsed_time", "gap_to_leader", "status",
+            "pit_stops", "compounds", "laps_completed", "elapsed_time", "gap_to_leader", "status",
         ]
         print(df_class[display_cols].to_string(index=False))
 
