@@ -59,6 +59,17 @@ def main() -> int:
         help="Predict finishing positions and generate attribution explanations for a specific event",
     )
     parser.add_argument(
+        "--simulate-race",
+        action="store_true",
+        help="Execute Phase 4 baseline race simulation for target event",
+    )
+    parser.add_argument(
+        "--laps",
+        type=int,
+        default=58,
+        help="Total race laps to simulate (default: 58)",
+    )
+    parser.add_argument(
         "--horizon",
         type=str,
         default="H3",
@@ -367,6 +378,91 @@ def main() -> int:
             print(f"\n[P{exp['predicted_rank']}] {exp['driver_id'].upper()} ({row['constructor_id']}):")
             for factor in exp["attributions"]:
                 print(f"  * {factor['factor']}: {factor['narrative']}")
+        return 0
+
+    if args.simulate_race:
+        import pandas as pd
+        import numpy as np
+        from src.features.pipeline import FeaturePipeline
+        from src.models.statistical import RidgePositionRegressor
+        from src.simulation.engine import BaselineRaceSimulator
+
+        print(f"\nInitializing Phase 4 Race Simulator: Season {args.target_season} Round {args.target_round} (Horizon: {args.horizon})...")
+        rr = pd.read_parquet("data/historical/historical_race_results.parquet")
+        q = pd.read_parquet("data/historical/historical_qualifying.parquet")
+        laps = pd.read_parquet("data/historical/historical_laps.parquet")
+        app = pd.read_parquet("data/historical/driver_circuit/driver_circuit_appearances.parquet")
+        circ = pd.read_parquet("data/historical/driver_circuit/circuit_characteristics.parquet")
+
+        pipeline = FeaturePipeline(rr, q, laps, app, circ)
+        event_df = pipeline.compile_features_for_event(
+            season=args.target_season,
+            round_num=args.target_round,
+            horizon=args.horizon,
+        )
+
+        if event_df.empty:
+            print(f"Error: No data available for Season {args.target_season} Round {args.target_round}")
+            return 1
+
+        feature_cols = [
+            "dpi_rating", "dpi_uncertainty", "driver_starts", "cpi_pole_gap_pct",
+            "cpi_reliability", "circuit_affinity_mean", "circuit_length_km",
+            "grid_position", "grid_x_overtaking",
+        ]
+
+        all_events = rr[["season", "round"]].drop_duplicates().sort_values(["season", "round"]).values
+        prior_events = [
+            (int(s), int(r)) for s, r in all_events
+            if (s < args.target_season) or (s == args.target_season and r < args.target_round)
+        ]
+
+        train_dfs = [pipeline.compile_features_for_event(s, r, horizon=args.horizon) for s, r in prior_events[:15]]
+        train_dfs = [df for df in train_dfs if not df.empty]
+        full_train = pd.concat(train_dfs, ignore_index=True)
+
+        ridge = RidgePositionRegressor().fit(full_train[feature_cols].fillna(0.0), full_train["target_rank"].values)
+        raw_pred = ridge.model.predict(ridge.scaler.transform(event_df[feature_cols].fillna(0.0)))
+        event_df["predicted_utility"] = -raw_pred
+
+        circuit_id = event_df["circuit_id"].iloc[0] if "circuit_id" in event_df.columns else "albert_park"
+        circuit_length = float(event_df["circuit_length_km"].iloc[0]) if "circuit_length_km" in event_df.columns else 5.278
+        base_lap_time = 82.0 if circuit_id == "albert_park" else 88.0
+
+        print(f"Simulating {args.laps} Laps at {circuit_id.replace('_', ' ').title()}...")
+        simulator = BaselineRaceSimulator(utility_scaling_factor=0.05)
+        sim_result = simulator.simulate_race(
+            event_features=event_df,
+            total_laps=args.laps,
+            circuit_id=circuit_id,
+            circuit_length_km=circuit_length,
+            base_lap_time=base_lap_time,
+            random_seed=42,
+        )
+
+        df_class = sim_result.final_classification
+
+        print("\n" + "=" * 110)
+        print(f"PACE PHASE 4: RACE SIMULATION RESULTS — SEASON {args.target_season} ROUND {args.target_round}")
+        print("=" * 110)
+        display_cols = [
+            "finish_position", "driver_id", "constructor_id", "grid_position",
+            "laps_completed", "elapsed_time", "gap_to_leader", "status",
+        ]
+        print(df_class[display_cols].to_string(index=False))
+
+        print("\n" + "=" * 110)
+        print("SIMULATION SUMMARY METRICS:")
+        print("=" * 110)
+        for k, v in sim_result.summary_metrics.items():
+            print(f"  - {k}: {v}")
+
+        # Top 3 fastest laps
+        lap_chart = sim_result.lap_chart
+        fastest_laps = lap_chart.sort_values("lap_time").head(3)
+        print("\nFastest Laps Recorded:")
+        for _, fl in fastest_laps.iterrows():
+            print(f"  * Lap {int(fl['lap'])}: {fl['driver_id']} ({fl['constructor_id']}) — {fl['lap_time']:.3f}s")
         return 0
 
     # Default action if no flags provided
