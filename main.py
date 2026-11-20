@@ -49,6 +49,11 @@ def main() -> int:
         help="Execute Phase 3 chronological walk-forward model benchmarking across seasons",
     )
     parser.add_argument(
+        "--run-ablation",
+        action="store_true",
+        help="Execute systematic Leave-One-Group-Out (LOGO) feature ablation study",
+    )
+    parser.add_argument(
         "--predict-race",
         action="store_true",
         help="Predict finishing positions and generate attribution explanations for a specific event",
@@ -219,6 +224,35 @@ def main() -> int:
         out_path = "data/processed/phase3_benchmark_results.parquet"
         summary_df.to_parquet(out_path)
         print(f"\nBenchmark results persisted to: {out_path}")
+        return 0
+
+    if args.run_ablation:
+        import pandas as pd
+        from src.features.pipeline import FeaturePipeline
+        from src.evaluation.ablation import FeatureAblationStudy
+
+        print("\nLoading historical datasets for Systematic Feature Ablation Study...")
+        rr = pd.read_parquet("data/historical/historical_race_results.parquet")
+        q = pd.read_parquet("data/historical/historical_qualifying.parquet")
+        laps = pd.read_parquet("data/historical/historical_laps.parquet")
+        app = pd.read_parquet("data/historical/driver_circuit/driver_circuit_appearances.parquet")
+        circ = pd.read_parquet("data/historical/driver_circuit/circuit_characteristics.parquet")
+
+        pipeline = FeaturePipeline(rr, q, laps, app, circ)
+        ablation_study = FeatureAblationStudy(pipeline, min_train_events=5, horizon=args.horizon)
+
+        print(f"\nExecuting Leave-One-Group-Out (LOGO) Ablation Testing (Horizon: {args.horizon})...")
+        ablation_res = ablation_study.run_logo_ablation()
+
+        print("\n" + "=" * 95)
+        print("PACE PHASE 3: SYSTEMATIC FEATURE GROUP ABLATION & OCCAM'S RAZOR PRUNING REPORT")
+        print("=" * 95)
+        ab_df = ablation_res["ablation_summary"]
+        print(ab_df.to_string(index=False))
+
+        out_path = "data/processed/phase3_ablation_results.parquet"
+        ab_df.to_parquet(out_path)
+        print(f"\nAblation results persisted to: {out_path}")
         return 0
 
     if args.predict_race:

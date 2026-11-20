@@ -180,3 +180,81 @@ class XGBoostLambdaMARTRanker:
             draws[m] = RankPermutationSolver.solve(draw_utilities, ascending=False)
 
         return draws
+
+
+class ChronologicalBootstrapRanker:
+    """Approach 3: Chronological Block Bootstrap Model Ensemble.
+    
+    Resamples past race events with replacement, trains an ensemble of K rankers,
+    and quantifies model epistemic uncertainty across ensemble forecasts.
+    """
+
+    def __init__(
+        self,
+        n_bootstrap: int = 10,
+        n_estimators: int = 50,
+        max_depth: int = 3,
+        learning_rate: float = 0.08,
+    ):
+        self.n_bootstrap = n_bootstrap
+        self.models: List[XGBoostLambdaMARTRanker] = []
+        self.n_estimators = n_estimators
+        self.max_depth = max_depth
+        self.learning_rate = learning_rate
+
+    def fit(
+        self,
+        event_dfs: List[pd.DataFrame],
+        feature_columns: List[str],
+    ) -> "ChronologicalBootstrapRanker":
+        """Fit ensemble across bootstrap resamples of past race events."""
+        n_events = len(event_dfs)
+        self.models = []
+
+        if n_events == 0:
+            return self
+
+        for b in range(self.n_bootstrap):
+            # Resample event indices with replacement
+            resample_idx = np.random.choice(n_events, size=n_events, replace=True)
+            resampled_dfs = [event_dfs[i] for i in resample_idx]
+
+            concat_df = pd.concat(resampled_dfs, ignore_index=True)
+            groups = [len(df) for df in resampled_dfs]
+
+            X = concat_df[feature_columns].fillna(0.0)
+            y = concat_df["target_rank"].values
+
+            model = XGBoostLambdaMARTRanker(
+                n_estimators=self.n_estimators,
+                max_depth=self.max_depth,
+                learning_rate=self.learning_rate,
+                random_state=42 + b,
+            )
+            model.fit(X, y, groups=groups)
+            self.models.append(model)
+
+        return self
+
+    def predict_ensemble(self, X: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray]:
+        """Predict ensemble average ranks and epistemic uncertainty across models.
+        
+        Returns:
+            (mean_ranks, rank_std): 1-indexed deterministic rank and ensemble std dev.
+        """
+        if not self.models:
+            n = len(X)
+            return np.arange(1, n + 1), np.zeros(n)
+
+        all_ranks = []
+        for model in self.models:
+            ranks = model.predict(X)
+            all_ranks.append(ranks)
+
+        rank_matrix = np.array(all_ranks)  # shape (n_bootstrap, n_drivers)
+        avg_rank = np.mean(rank_matrix, axis=0)
+        rank_std = np.std(rank_matrix, axis=0)
+
+        # Deterministic consensus rank
+        final_ranks = RankPermutationSolver.solve(avg_rank, ascending=True)
+        return final_ranks, rank_std

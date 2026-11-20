@@ -138,6 +138,15 @@ class CompleteOutcomeSpaceEngine:
             # Expected finish position
             expected_pos = float(np.sum(k_indices * pos_probs) + n * (p_retire + p_dns + p_dsq))
 
+            # Shannon entropy of classified finishing distribution H(P)
+            valid_p = pos_probs[pos_probs > 1e-12]
+            entropy = float(-np.sum(valid_p * np.log2(valid_p))) if len(valid_p) > 0 else 0.0
+
+            # 90% credible intervals (P05 and P95) from cumulative distribution
+            cum_p = np.cumsum(pos_probs) / max(p_classified_total, 1e-6)
+            idx_05 = int(np.searchsorted(cum_p, 0.05)) + 1
+            idx_95 = int(np.searchsorted(cum_p, 0.95)) + 1
+
             driver_outcome = {
                 "p_classified_total": float(p_classified_total),
                 "p_mech_dnf": float(p_mech),
@@ -146,7 +155,11 @@ class CompleteOutcomeSpaceEngine:
                 "p_dsq": float(p_dsq),
                 "expected_position": expected_pos,
                 "position_distribution": pos_probs.tolist(),
+                "distribution_entropy": entropy,
+                "rank_p05": min(idx_05, n),
+                "rank_p95": min(idx_95, n),
                 "sum_total": float(np.sum(pos_probs) + p_mech + p_incident + p_dns + p_dsq),
+                "note_multi_car": "Marginal baseline probability; joint collision clustering & safety car cascade simulated in Phase 4.",
             }
             results.append(driver_outcome)
 

@@ -14,6 +14,7 @@ from src.models.ranker import (
     XGBoostPairwiseRanker,
     XGBoostLambdaMARTRanker,
     RankPermutationSolver,
+    ChronologicalBootstrapRanker,
 )
 from src.models.dnf import (
     CalibratedDNFModel,
@@ -30,6 +31,7 @@ __all__ = [
     "XGBoostPairwiseRanker",
     "XGBoostLambdaMARTRanker",
     "RankPermutationSolver",
+    "ChronologicalBootstrapRanker",
     "CalibratedDNFModel",
     "CompleteOutcomeSpaceEngine",
 ]

@@ -30,6 +30,87 @@ class InferredTelemetryMetrics:
     speed_trap_percentile: float = 0.50 # Direct measurement: percentile in speed trap ranking
 
 
+@dataclass
+class LatentFuelStateEstimate:
+    """Carries inferred latent fuel state probability distribution and mass estimate.
+    
+    Fuel state is treated strictly as an unobserved latent variable, never directly measured.
+    """
+    p_low_fuel: float = 0.50            # Probability of qualifying simulation (low fuel ~15 ± 10 kg)
+    p_high_fuel: float = 0.50           # Probability of race simulation (high fuel ~60 ± 20 kg)
+    expected_fuel_kg: float = 40.0      # Expected onboard fuel mass
+    fuel_uncertainty_kg: float = 18.0   # Credible interval standard deviation
+    inferred_state: str = "Medium Fuel" # Discrete maximum a posteriori state
+
+
+def infer_stint_latent_fuel_state(
+    stint_laps_count: int,
+    median_lap_time_ms: float = 90000.0,
+    pole_time_ms: Optional[float] = None,
+) -> LatentFuelStateEstimate:
+    """Infer latent fuel state from observed stint length and pace relative to pole.
+    
+    Short stints (<= 6 laps) with pace near pole indicate low fuel qualifying runs.
+    Long stints (>= 10 laps) with pace delta > 3% indicate high fuel race simulations.
+    """
+    # 1. Stint length likelihood
+    if stint_laps_count <= 5:
+        p_len_low = 0.85
+        p_len_high = 0.15
+    elif stint_laps_count >= 10:
+        p_len_low = 0.10
+        p_len_high = 0.90
+    else:
+        p_len_low = 0.50
+        p_len_high = 0.50
+
+    # 2. Pace delta likelihood if pole time is available
+    if pole_time_ms is not None and pole_time_ms > 0:
+        pace_delta_pct = (median_lap_time_ms - pole_time_ms) / pole_time_ms
+        if pace_delta_pct < 0.025:
+            # Within 2.5% of pole -> strong evidence for low fuel
+            p_pace_low = 0.80
+            p_pace_high = 0.20
+        elif pace_delta_pct > 0.050:
+            # Over 5% off pole -> evidence for heavy fuel
+            p_pace_low = 0.15
+            p_pace_high = 0.85
+        else:
+            p_pace_low = 0.50
+            p_pace_high = 0.50
+    else:
+        p_pace_low = 0.50
+        p_pace_high = 0.50
+
+    # Unnormalized posterior
+    raw_low = p_len_low * p_pace_low
+    raw_high = p_len_high * p_pace_high
+    total = raw_low + raw_high
+    p_low = raw_low / max(total, 1e-6)
+    p_high = raw_high / max(total, 1e-6)
+
+    # Expected fuel mass (Mixture: 15kg for low, 65kg for high)
+    exp_fuel = float(p_low * 15.0 + p_high * 65.0)
+    # Variance of mixture = E[Var] + Var[E]
+    var_fuel = float(p_low * (10.0 ** 2) + p_high * (18.0 ** 2) + p_low * ((15.0 - exp_fuel) ** 2) + p_high * ((65.0 - exp_fuel) ** 2))
+    std_fuel = float(math.sqrt(max(var_fuel, 1.0)))
+
+    if p_low > 0.65:
+        state_label = "Low Fuel (Qualy Sim)"
+    elif p_high > 0.65:
+        state_label = "High Fuel (Race Sim)"
+    else:
+        state_label = "Medium Fuel (Mixed)"
+
+    return LatentFuelStateEstimate(
+        p_low_fuel=float(p_low),
+        p_high_fuel=float(p_high),
+        expected_fuel_kg=exp_fuel,
+        fuel_uncertainty_kg=std_fuel,
+        inferred_state=state_label,
+    )
+
+
 def calculate_circuit_fuel_sensitivity(
     circuit_length_km: float = 5.0,
     tyre_stress_level: float = 3.0,

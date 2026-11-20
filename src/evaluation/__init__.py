@@ -11,6 +11,7 @@ from src.evaluation.metrics import (
 )
 from src.evaluation.explainability import PredictionExplainer
 from src.evaluation.backtest import WalkForwardBacktester
+from src.evaluation.ablation import FeatureAblationStudy, FEATURE_GROUPS
 
 __all__ = [
     "calculate_race_mae",
@@ -22,4 +23,6 @@ __all__ = [
     "evaluate_race_predictions",
     "PredictionExplainer",
     "WalkForwardBacktester",
+    "FeatureAblationStudy",
+    "FEATURE_GROUPS",
 ]

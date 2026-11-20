@@ -12,6 +12,7 @@ Tier 3:
 
 from __future__ import annotations
 
+import math
 from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
@@ -156,6 +157,20 @@ class HierarchicalLMMRanker:
 
         self.driver_effects = u_d
         self.constructor_effects = v_c
+
+        # Compute posterior standard errors for Bayesian uncertainty propagation
+        sigma_res = float(np.std(data["res"])) if len(data) > 2 else 2.5
+        self.driver_ses = {
+            d: sigma_res / math.sqrt(len(data[data["driver_id"] == d]) + self.alpha_driver)
+            for d in drivers
+        }
+        self.constructor_ses = {
+            c: sigma_res / math.sqrt(len(data[data["constructor_id"] == c]) + self.alpha_constructor)
+            for c in constructors
+        }
+        self.default_driver_se = sigma_res / math.sqrt(self.alpha_driver)
+        self.default_constructor_se = sigma_res / math.sqrt(self.alpha_constructor)
+
         return self
 
     def predict(self, df: pd.DataFrame) -> np.ndarray:
@@ -180,3 +195,39 @@ class HierarchicalLMMRanker:
         ranks = np.empty_like(order)
         ranks[order] = np.arange(1, len(pred_scores) + 1)
         return ranks.astype(int)
+
+    def sample_posterior_predictions(self, df: pd.DataFrame, n_draws: int = 1000) -> np.ndarray:
+        """Approach 1: Full Bayesian posterior predictive draws from joint driver/team effects.
+        
+        Returns:
+            draws: Array of shape (n_draws, n_drivers) with 1-indexed finishing ranks.
+        """
+        grid = df["grid_position"].fillna(15.0).values
+        n_drivers = len(df)
+        draws = np.empty((n_draws, n_drivers), dtype=int)
+
+        for m in range(n_draws):
+            scores = []
+            for i, row in df.iterrows():
+                d_id = row["driver_id"]
+                c_id = row["constructor_id"]
+                g_pos = grid[i] if i < len(grid) else 15.0
+
+                mean_u = self.driver_effects.get(d_id, 0.0)
+                se_u = getattr(self, "driver_ses", {}).get(d_id, getattr(self, "default_driver_se", 1.0))
+                u_draw = np.random.normal(mean_u, se_u)
+
+                mean_v = self.constructor_effects.get(c_id, 0.0)
+                se_v = getattr(self, "constructor_ses", {}).get(c_id, getattr(self, "default_constructor_se", 1.0))
+                v_draw = np.random.normal(mean_v, se_v)
+
+                score = self.intercept + self.beta_grid * g_pos + u_draw + v_draw
+                scores.append(score)
+
+            scores = np.array(scores)
+            order = np.argsort(scores)
+            ranks = np.empty_like(order)
+            ranks[order] = np.arange(1, n_drivers + 1)
+            draws[m] = ranks
+
+        return draws

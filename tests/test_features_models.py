@@ -190,3 +190,66 @@ def test_evaluation_metrics_exactness():
     assert top1 == 1.0
     # Top 3: pred has {0, 1, 2}, actual has {0, 1, 3} -> 2/3 hit rate
     assert pytest.approx(top3, abs=1e-4) == 2.0 / 3.0
+
+
+def test_latent_fuel_state_inference():
+    """Verify latent fuel state inference yields distinct low/high fuel mixtures with uncertainty."""
+    from src.features.cpi import infer_stint_latent_fuel_state
+
+    # Short stint with pace near pole (Qualy simulation)
+    low_fuel_est = infer_stint_latent_fuel_state(
+        stint_laps_count=3,
+        median_lap_time_ms=85000.0,
+        pole_time_ms=84500.0,
+    )
+    assert low_fuel_est.p_low_fuel > low_fuel_est.p_high_fuel
+    assert low_fuel_est.expected_fuel_kg < 35.0
+    assert low_fuel_est.fuel_uncertainty_kg > 0.0
+
+    # Long stint with pace off pole (Race simulation)
+    high_fuel_est = infer_stint_latent_fuel_state(
+        stint_laps_count=16,
+        median_lap_time_ms=90500.0,
+        pole_time_ms=84500.0,
+    )
+    assert high_fuel_est.p_high_fuel > high_fuel_est.p_low_fuel
+    assert high_fuel_est.expected_fuel_kg > 45.0
+    assert high_fuel_est.fuel_uncertainty_kg > 0.0
+
+
+def test_bayesian_lmm_posterior_predictions():
+    """Verify Hierarchical LMM Bayesian posterior sampling produces valid permutation draws."""
+    from src.models.statistical import HierarchicalLMMRanker
+
+    df = pd.DataFrame([
+        {"driver_id": "verstappen", "constructor_id": "red_bull", "grid_position": 1.0, "finish_position": 1.0},
+        {"driver_id": "norris", "constructor_id": "mclaren", "grid_position": 2.0, "finish_position": 2.0},
+        {"driver_id": "leclerc", "constructor_id": "ferrari", "grid_position": 3.0, "finish_position": 3.0},
+        {"driver_id": "hamilton", "constructor_id": "ferrari", "grid_position": 4.0, "finish_position": 4.0},
+        {"driver_id": "russell", "constructor_id": "mercedes", "grid_position": 5.0, "finish_position": 5.0},
+    ])
+
+    lmm = HierarchicalLMMRanker().fit(df)
+    draws = lmm.sample_posterior_predictions(df, n_draws=50)
+
+    assert draws.shape == (50, 5)
+    for m in range(50):
+        assert set(draws[m]) == {1, 2, 3, 4, 5}
+
+
+def test_complete_outcome_entropy_and_intervals():
+    """Verify distribution entropy and 90% credible intervals."""
+    utilities = np.array([20.0, 15.0, 10.0, 5.0, 0.0])
+    p_dnf = np.array([0.10, 0.15, 0.12, 0.20, 0.08])
+    reliabilities = np.array([0.98, 0.95, 0.90, 0.85, 0.92])
+
+    outcomes = CompleteOutcomeSpaceEngine.compute_complete_distribution(
+        utilities=utilities,
+        p_dnf=p_dnf,
+        reliabilities=reliabilities,
+    )
+
+    for out in outcomes:
+        assert out["distribution_entropy"] > 0.0
+        assert 1 <= out["rank_p05"] <= out["rank_p95"] <= 5
+        assert "note_multi_car" in out

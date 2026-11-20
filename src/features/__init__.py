@@ -11,6 +11,8 @@ from src.features.dpi import (
 )
 from src.features.cpi import (
     InferredTelemetryMetrics,
+    LatentFuelStateEstimate,
+    infer_stint_latent_fuel_state,
     calculate_circuit_fuel_sensitivity,
     estimate_tyre_degradation_huber,
     calculate_constructor_qualifying_pole_gap,
@@ -33,6 +35,8 @@ __all__ = [
     "calculate_pace_consistency_cv",
     "BradleyTerryEngine",
     "InferredTelemetryMetrics",
+    "LatentFuelStateEstimate",
+    "infer_stint_latent_fuel_state",
     "calculate_circuit_fuel_sensitivity",
     "estimate_tyre_degradation_huber",
     "calculate_constructor_qualifying_pole_gap",
