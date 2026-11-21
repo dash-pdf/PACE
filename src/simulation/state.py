@@ -73,6 +73,8 @@ class CarState:
     overtakes_made: int = 0
     times_overtaken: int = 0
     times_lapped: int = 0
+    mechanical_hazard_mult: float = 1.0
+    incident_involvement_count: int = 0
     lap_times_history: List[float] = field(default_factory=list)
     positions_history: List[int] = field(default_factory=list)
 
@@ -101,9 +103,14 @@ class RaceState:
     circuit_length_km: float
     base_lap_time: float  # Circuit reference lap time in seconds
     track_condition: TrackCondition = TrackCondition.DRY
+    track_moisture: float = 0.0  # 0.0 (bone dry) to 1.0 (standing water)
     track_temperature_c: float = 30.0
     race_mode: RaceMode = RaceMode.GREEN
     sc_laps_remaining: int = 0
+    sc_restart_lap: Optional[int] = None
+    red_flag_laps_remaining: int = 0
+    neutralisation_cause: str = ""
+    active_debris_sectors: Set[int] = field(default_factory=set)
     cars: Dict[str, CarState] = field(default_factory=dict)
     leader_id: Optional[str] = None
     incident_log: List[dict] = field(default_factory=list)

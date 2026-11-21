@@ -141,6 +141,13 @@ class StrategyEngine:
         current_compound = CompoundType(car.current_compound)
         profile = self.tyre_model.get_profile(current_compound)
 
+        # 0. Weather Crossover Emergency Trigger:
+        # If running slicks on a damp or wet track, or wet tyres on a drying track:
+        if race.track_condition in (TrackCondition.DAMP, TrackCondition.WET) and current_compound.is_dry:
+            return True
+        if race.track_condition == TrackCondition.DRY and current_compound.is_wet:
+            return True
+
         # 1. Thermal Cliff Breach: Lap time degradation > 2.2s
         tyre_delta = self.tyre_model.compute_tyre_pace_delta(
             compound=current_compound,
@@ -211,16 +218,30 @@ class StrategyEngine:
         old_compound = car.current_compound
         old_tyre_age = car.tyre_age
 
-        # Determine next compound from stint plan (or fallback to opposite dry compound)
-        next_stop_idx = car.pit_stops_count + 1
-        if next_stop_idx < len(stint_plan.compounds):
-            next_compound = stint_plan.compounds[next_stop_idx].value
+        # Determine next compound: weather overrides dry stint plans
+        if race.track_condition == TrackCondition.WET:
+            next_compound = "wet"
+        elif race.track_condition == TrackCondition.DAMP:
+            next_compound = "intermediate"
+        elif race.track_condition == TrackCondition.DRY and old_compound in ("intermediate", "wet"):
+            next_compound = "medium"
         else:
-            # Fallback for extra unplanned stops: switch between Medium and Hard
-            next_compound = "hard" if old_compound == "medium" else "medium"
+            # Planned dry compound sequence
+            next_stop_idx = car.pit_stops_count + 1
+            if next_stop_idx < len(stint_plan.compounds):
+                next_compound = stint_plan.compounds[next_stop_idx].value
+            else:
+                # Fallback for extra unplanned stops: switch between Medium and Hard
+                next_compound = "hard" if old_compound == "medium" else "medium"
+
+        # Check for front wing nose replacement if damaged
+        nose_repair_time = 0.0
+        if car.damage_factor > 0.30:
+            nose_repair_time = 3.50
+            car.damage_factor = 0.0  # Repaired aerodynamic components
 
         # Apply pit stop updates to CarState
-        car.elapsed_time += duration_res.total_loss_s
+        car.elapsed_time += (duration_res.total_loss_s + nose_repair_time)
         car.pit_stops_count += 1
         car.current_compound = next_compound
         car.compounds_used.add(next_compound)

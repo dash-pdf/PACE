@@ -209,6 +209,9 @@ def test_stage3_simulator_run_on_2026_round_5():
         circuit_id="villeneuve",
         base_lap_time=80.0,
         random_seed=42,
+        enable_mechanical_failures=False,
+        enable_incidents=False,
+        enable_safety_car=False,
     )
 
     df_class = res.final_classification

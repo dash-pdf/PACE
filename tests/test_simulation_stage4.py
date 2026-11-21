@@ -276,6 +276,9 @@ def test_stage4_simulation_full_race():
         base_lap_time=88.0,
         tyre_stress_level=3.0,
         random_seed=42,
+        enable_mechanical_failures=False,
+        enable_incidents=False,
+        enable_safety_car=False,
     )
 
     df_class = res.final_classification

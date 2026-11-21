@@ -199,6 +199,9 @@ def test_baseline_race_simulator_run_on_2026_round_5():
         circuit_id="albert_park",
         base_lap_time=80.0,
         random_seed=42,
+        enable_mechanical_failures=False,
+        enable_incidents=False,
+        enable_safety_car=False,
     )
 
     df_class = result.final_classification

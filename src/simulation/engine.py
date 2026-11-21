@@ -24,6 +24,10 @@ from src.simulation.fuel import FuelModel
 from src.simulation.pit_model import PitStopModel
 from src.simulation.strategy import StrategyEngine, StintPlan
 from src.simulation.traffic import TrafficOvertakingEngine, CircuitDRSConfig
+from src.simulation.reliability import ReliabilityEngine, FailureCheckResult
+from src.simulation.incidents import IncidentEngine, IncidentSeverity, NeutralisationTrigger, IncidentResult
+from src.simulation.neutralisation import NeutralisationEngine
+from src.simulation.weather import WeatherEngine, WeatherEvolutionConfig
 from src.simulation.rules import FIAClassificationEngine
 
 
@@ -38,7 +42,9 @@ class SimulationResult:
 
 
 class BaselineRaceSimulator:
-    """Stage 4: Event-driven F1 race simulator with tyres, fuel, pit strategy, DRS, and overtaking."""
+    """Stage 5: Event-driven F1 race simulator with tyres, fuel, pit strategy, DRS,
+    overtaking, mechanical reliability, collisions, Safety Car/VSC, and dynamic weather.
+    """
 
     def __init__(
         self,
@@ -47,11 +53,19 @@ class BaselineRaceSimulator:
         fuel_model: Optional[FuelModel] = None,
         pit_model: Optional[PitStopModel] = None,
         traffic_engine: Optional[TrafficOvertakingEngine] = None,
+        reliability_engine: Optional[ReliabilityEngine] = None,
+        incident_engine: Optional[IncidentEngine] = None,
+        neutralisation_engine: Optional[NeutralisationEngine] = None,
+        weather_engine: Optional[WeatherEngine] = None,
     ):
         self.tyre_model = tyre_model or TyreModel()
         self.fuel_model = fuel_model or FuelModel()
         self.pit_model = pit_model or PitStopModel()
         self.traffic_engine = traffic_engine or TrafficOvertakingEngine()
+        self.reliability_engine = reliability_engine or ReliabilityEngine()
+        self.incident_engine = incident_engine or IncidentEngine()
+        self.neutralisation_engine = neutralisation_engine or NeutralisationEngine()
+        self.weather_engine = weather_engine or WeatherEngine()
         self.pace_model = StochasticPaceModel(
             utility_scaling_factor=utility_scaling_factor,
             tyre_model=self.tyre_model,
@@ -73,10 +87,17 @@ class BaselineRaceSimulator:
         tyre_stress_level: float = 3.0,
         random_seed: int = 42,
         deterministic: bool = False,
+        weather_config: Optional[WeatherEvolutionConfig] = None,
+        enable_mechanical_failures: bool = True,
+        enable_incidents: bool = True,
+        enable_safety_car: bool = True,
     ) -> SimulationResult:
         """Execute a full-distance Grand Prix simulation."""
         rng = np.random.RandomState(random_seed)
         self.dispatcher.clear()
+
+        if weather_config is not None:
+            self.weather_engine.config = weather_config
 
         # 1. Initialize global race state and circuit DRS configuration
         drs_config = self.traffic_engine.get_circuit_config(circuit_id)
@@ -114,6 +135,14 @@ class BaselineRaceSimulator:
         # Sample circuit fuel sensitivity with uncertainty
         fuel_sens = self.fuel_model.sample_circuit_sensitivity(rng=None if deterministic else rng)
 
+        # Sample constructor reliability realizations
+        constructor_ids = event_features["constructor_id"].tolist() if "constructor_id" in event_features.columns else []
+        constructor_mults = self.reliability_engine.sample_constructor_hazard_multipliers(
+            constructor_ids=constructor_ids,
+            rng=None if deterministic else rng,
+            deterministic=deterministic,
+        )
+
         # 3. Initialize car states and pre-race stint plans
         sorted_grid = event_features.sort_values("grid_position")
         stint_plans: Dict[str, StintPlan] = {}
@@ -126,7 +155,7 @@ class BaselineRaceSimulator:
 
             # Sample driver initial stint degradation rate
             cpi_rel = float(row.get("cpi_reliability", 0.95))
-            cpi_mult = 1.0 + max(0.0, 0.95 - cpi_rel)  # Lower reliability / worse chassis has slightly higher tyre wear
+            cpi_mult = 1.0 + max(0.0, 0.95 - cpi_rel)
             deg_rate = self.tyre_model.sample_stint_degradation_rate(
                 compound="medium",
                 constructor_deg_multiplier=cpi_mult,
@@ -163,11 +192,77 @@ class BaselineRaceSimulator:
 
         lap_chart_records = []
 
-        # 4. Lap-by-lap simulation loop with micro-sector gap tracking and overtaking
+        # 4. Lap-by-lap event-driven simulation loop
         for lap in range(1, total_laps + 1):
             race.current_lap = lap
 
-            # Check strategic pit stops before cars start the lap
+            # A. Dynamic Weather Evolution
+            self.weather_engine.update_weather_state(
+                race=race,
+                dispatcher=self.dispatcher,
+                rng=None if deterministic else rng,
+            )
+
+            # B. Neutralisation Step (Safety Car field bunching & green flag restarts)
+            self.neutralisation_engine.process_neutralisation_step(
+                race=race,
+                dispatcher=self.dispatcher,
+                rng=None if deterministic else rng,
+            )
+
+            # C. Lap 1 Turn 1 Standing Start Incident Scramble
+            if lap == 1 and enable_incidents and not deterministic:
+                t1_res = self.incident_engine.evaluate_turn1_scramble(race, rng=rng, deterministic=deterministic)
+                if t1_res and t1_res.occurred:
+                    self.dispatcher.emit(
+                        SimulationEvent(
+                            event_type=EventType.INCIDENT,
+                            lap=1,
+                            driver_id=t1_res.primary_driver_id,
+                            constructor_id=race.cars[t1_res.primary_driver_id].constructor_id,
+                            details=t1_res.details,
+                        )
+                    )
+                    if enable_safety_car and t1_res.neutralisation_recommended != NeutralisationTrigger.NONE:
+                        self.neutralisation_engine.trigger_neutralisation(
+                            trigger=t1_res.neutralisation_recommended,
+                            race=race,
+                            cause="turn1_standing_start_collision",
+                            dispatcher=self.dispatcher,
+                            rng=rng,
+                        )
+
+            # D. Mechanical Reliability Hazard Checks
+            if enable_mechanical_failures and not deterministic:
+                for car in race.cars.values():
+                    if not car.status.is_active:
+                        continue
+                    c_mult = constructor_mults.get(car.constructor_id, 1.0)
+                    fail_res = self.reliability_engine.evaluate_car_reliability(
+                        car=car,
+                        race=race,
+                        constructor_mult=c_mult,
+                        rng=rng,
+                        deterministic=deterministic,
+                    )
+                    if fail_res.has_failed:
+                        self.reliability_engine.execute_mechanical_retirement(
+                            car=car,
+                            race=race,
+                            check_res=fail_res,
+                            dispatcher=self.dispatcher,
+                        )
+                        if fail_res.is_stranded_on_track and enable_safety_car:
+                            neut = NeutralisationTrigger.SAFETY_CAR if (rng is not None and rng.uniform(0.0, 1.0) < 0.60) else NeutralisationTrigger.VSC
+                            self.neutralisation_engine.trigger_neutralisation(
+                                trigger=neut,
+                                race=race,
+                                cause=f"stranded_car_{car.driver_id}",
+                                dispatcher=self.dispatcher,
+                                rng=rng,
+                            )
+
+            # E. Strategic Pit Stop Decisions
             for car in race.cars.values():
                 if not car.status.is_active:
                     continue
@@ -190,7 +285,7 @@ class BaselineRaceSimulator:
                     )
                     driver_stint_deg_rates[d_id] = new_deg_rate
 
-            # Compute nominal lap pace for each active car
+            # F. Compute Nominal Pace for Active Cars
             car_sector_times: Dict[str, List[float]] = {}
             for car in race.cars.values():
                 if not car.status.is_active:
@@ -217,14 +312,28 @@ class BaselineRaceSimulator:
 
                 car_sector_times[d_id] = [float(f * nom_lap_time) for f in sector_fractions]
 
-            # Simulate through the 3 micro-sectors (S1, S2, S3)
+            # G. Simulate Micro-Sectors (S1, S2, S3)
             for s_idx, (f_frac, s_num) in enumerate(zip(sector_fractions, (1, 2, 3))):
                 ordered_active = [c for c in race.get_ordered_field() if c.status.is_active]
 
-                # Pass 1: Gaps, DRS eligibility, dirty air aero/tyre effect, and blue flags
+                # Pass 1: Gaps, Debris, DRS Eligibility, Dirty Air Aero/Tyre Effects, Blue Flags
                 for pos_idx, car in enumerate(ordered_active):
                     d_id = car.driver_id
                     sec_time = car_sector_times[d_id][s_idx]
+
+                    # Check debris puncture risk in this sector
+                    if enable_incidents and not deterministic:
+                        if self.incident_engine.evaluate_debris_hazard(car, s_num, race, rng=rng, deterministic=deterministic):
+                            sec_time += 1.20
+                            self.dispatcher.emit(
+                                SimulationEvent(
+                                    event_type=EventType.DEBRIS_WARNING,
+                                    lap=lap,
+                                    driver_id=car.driver_id,
+                                    constructor_id=car.constructor_id,
+                                    details={"sector": s_num, "puncture_damage_loss_s": 1.20},
+                                )
+                            )
 
                     if pos_idx == 0:
                         car.drs_active = False
@@ -254,12 +363,16 @@ class BaselineRaceSimulator:
                                 )
                             )
                         else:
-                            # DRS eligibility check
-                            has_drs = self.traffic_engine.is_drs_eligible(
-                                gap_at_detection=gap_ahead,
-                                race_mode=race.race_mode,
-                                lap=lap,
-                                track_condition=race.track_condition,
+                            # DRS eligibility (disabled if restart within 2 laps or track wet)
+                            is_post_restart = bool(race.sc_restart_lap and lap <= race.sc_restart_lap + 1)
+                            has_drs = (
+                                not is_post_restart
+                                and self.traffic_engine.is_drs_eligible(
+                                    gap_at_detection=gap_ahead,
+                                    race_mode=race.race_mode,
+                                    lap=lap,
+                                    track_condition=race.track_condition,
+                                )
                             )
                             car.drs_active = has_drs
 
@@ -279,7 +392,7 @@ class BaselineRaceSimulator:
 
                     car_sector_times[d_id][s_idx] = sec_time
 
-                # Pass 2: Stochastic overtaking in designated primary overtaking sector
+                # Pass 2: Stochastic Overtaking & Contact Incident Checks
                 is_overtake_sector = (s_num == drs_config.primary_overtake_sector)
                 if is_overtake_sector and lap >= 2 and race.race_mode == RaceMode.GREEN:
                     for i in range(len(ordered_active) - 1, 0, -1):
@@ -291,6 +404,39 @@ class BaselineRaceSimulator:
 
                         gap_to_def = max(0.0, attacker.elapsed_time - defender.elapsed_time)
                         if gap_to_def <= 0.75:
+                            # Contact incident check during close battles
+                            if enable_incidents and not deterministic and gap_to_def <= 0.45:
+                                contact_res = self.incident_engine.evaluate_overtake_contact(
+                                    attacker=attacker,
+                                    defender=defender,
+                                    gap_ahead=gap_to_def,
+                                    sector=s_num,
+                                    race=race,
+                                    rng=rng,
+                                    deterministic=deterministic,
+                                )
+                                if contact_res and contact_res.occurred:
+                                    self.dispatcher.emit(
+                                        SimulationEvent(
+                                            event_type=EventType.INCIDENT,
+                                            lap=lap,
+                                            driver_id=attacker.driver_id,
+                                            constructor_id=attacker.constructor_id,
+                                            details=contact_res.details,
+                                        )
+                                    )
+                                    if enable_safety_car and contact_res.neutralisation_recommended != NeutralisationTrigger.NONE:
+                                        self.neutralisation_engine.trigger_neutralisation(
+                                            trigger=contact_res.neutralisation_recommended,
+                                            race=race,
+                                            cause=f"collision_{attacker.driver_id}_{defender.driver_id}",
+                                            dispatcher=self.dispatcher,
+                                            rng=rng,
+                                        )
+                                    # If terminal collision, skip normal pass execution
+                                    if not attacker.status.is_active or not defender.status.is_active:
+                                        continue
+
                             att_pace = car_sector_times[attacker.driver_id][s_idx] / f_frac
                             def_pace = car_sector_times[defender.driver_id][s_idx] / f_frac
                             def_rating = self.traffic_engine.evaluate_defensive_rating(
@@ -345,7 +491,7 @@ class BaselineRaceSimulator:
                             elif ot_res.attempted:
                                 car_sector_times[attacker.driver_id][s_idx] += 0.06
 
-            # Complete lap for each active car
+            # H. Complete Lap for Active Cars
             for car in race.cars.values():
                 if not car.status.is_active:
                     continue
@@ -366,6 +512,7 @@ class BaselineRaceSimulator:
                             "compound": car.current_compound,
                             "drs": car.drs_active,
                             "overtakes": car.overtakes_made,
+                            "race_mode": race.race_mode.value,
                         },
                     )
                 )
@@ -387,7 +534,11 @@ class BaselineRaceSimulator:
                     "tyre_age": car.tyre_age,
                     "pit_stops": car.pit_stops_count,
                     "overtakes": car.overtakes_made,
+                    "damage_factor": round(car.damage_factor, 3),
                     "drs_active": car.drs_active,
+                    "race_mode": race.race_mode.value,
+                    "track_condition": race.track_condition.value,
+                    "track_moisture": round(race.track_moisture, 3),
                     "status": car.status.value,
                 })
 
@@ -396,10 +547,15 @@ class BaselineRaceSimulator:
 
         lap_chart_df = pd.DataFrame(lap_chart_records)
 
-        # Count total pit stops, overtakes, and blue flag events across field
+        # Count total events across field
         total_pits = sum(car.pit_stops_count for car in race.cars.values())
         total_overtakes = sum(car.overtakes_made for car in race.cars.values())
         total_lappings = sum(car.times_lapped for car in race.cars.values())
+        mech_dnfs = sum(1 for car in race.cars.values() if car.status == CarStatus.DNF_MECHANICAL)
+        inc_dnfs = sum(1 for car in race.cars.values() if car.status == CarStatus.DNF_INCIDENT)
+        sc_count = sum(1 for e in self.dispatcher.events if e.event_type == EventType.SAFETY_CAR_DEPLOYED)
+        vsc_count = sum(1 for e in self.dispatcher.events if e.event_type == EventType.VSC_DEPLOYED)
+        weather_changes = sum(1 for e in self.dispatcher.events if e.event_type == EventType.WEATHER_CHANGE)
 
         summary = {
             "circuit_id": circuit_id,
@@ -409,16 +565,14 @@ class BaselineRaceSimulator:
             "total_pit_stops": total_pits,
             "total_overtakes": total_overtakes,
             "total_lappings": total_lappings,
+            "mechanical_dnfs": mech_dnfs,
+            "incident_dnfs": inc_dnfs,
+            "safety_car_deployments": sc_count,
+            "vsc_deployments": vsc_count,
+            "weather_changes": weather_changes,
             "winner": final_classification_df.iloc[0]["driver_id"] if not final_classification_df.empty else None,
             "total_race_time": float(final_classification_df.iloc[0]["elapsed_time"]) if not final_classification_df.empty else 0.0,
         }
-
-        return SimulationResult(
-            final_classification=final_classification_df,
-            lap_chart=lap_chart_df,
-            events=self.dispatcher.events,
-            summary_metrics=summary,
-        )
 
         return SimulationResult(
             final_classification=final_classification_df,

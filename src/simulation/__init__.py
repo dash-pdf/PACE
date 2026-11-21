@@ -25,6 +25,20 @@ from src.simulation.traffic import (
     CIRCUIT_DRS_PROFILES,
     OvertakeAttemptResult,
 )
+from src.simulation.reliability import (
+    ReliabilityEngine,
+    MechanicalSubsystem,
+    FailureCheckResult,
+    CONSTRUCTOR_BASELINE_RELIABILITY,
+)
+from src.simulation.incidents import (
+    IncidentEngine,
+    IncidentSeverity,
+    NeutralisationTrigger,
+    IncidentResult,
+)
+from src.simulation.neutralisation import NeutralisationEngine
+from src.simulation.weather import WeatherEngine, WeatherEvolutionConfig
 from src.simulation.rules import FIAClassificationEngine
 from src.simulation.engine import BaselineRaceSimulator, SimulationResult
 
@@ -50,6 +64,17 @@ __all__ = [
     "CircuitDRSConfig",
     "CIRCUIT_DRS_PROFILES",
     "OvertakeAttemptResult",
+    "ReliabilityEngine",
+    "MechanicalSubsystem",
+    "FailureCheckResult",
+    "CONSTRUCTOR_BASELINE_RELIABILITY",
+    "IncidentEngine",
+    "IncidentSeverity",
+    "NeutralisationTrigger",
+    "IncidentResult",
+    "NeutralisationEngine",
+    "WeatherEngine",
+    "WeatherEvolutionConfig",
     "StochasticPaceModel",
     "BaselinePaceModel",
     "FIAClassificationEngine",
