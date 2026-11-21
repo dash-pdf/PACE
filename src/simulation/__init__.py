@@ -41,6 +41,8 @@ from src.simulation.neutralisation import NeutralisationEngine
 from src.simulation.weather import WeatherEngine, WeatherEvolutionConfig
 from src.simulation.rules import FIAClassificationEngine
 from src.simulation.engine import BaselineRaceSimulator, SimulationResult
+from src.simulation.monte_carlo import MonteCarloSimulationEngine, MonteCarloResult
+from src.simulation.realism import SimulationRealismAuditor, HISTORICAL_F1_BENCHMARKS
 
 __all__ = [
     "CarState",
@@ -80,4 +82,8 @@ __all__ = [
     "FIAClassificationEngine",
     "BaselineRaceSimulator",
     "SimulationResult",
+    "MonteCarloSimulationEngine",
+    "MonteCarloResult",
+    "SimulationRealismAuditor",
+    "HISTORICAL_F1_BENCHMARKS",
 ]

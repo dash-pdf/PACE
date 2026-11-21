@@ -95,5 +95,6 @@ def evaluate_race_predictions(
         "kendall_tau": calculate_kendall_tau(predicted_ranks, actual_positions),
         "top_1_hit": calculate_top_k_hit_rate(predicted_ranks, actual_positions, k=1),
         "top_3_hit": calculate_top_k_hit_rate(predicted_ranks, actual_positions, k=3),
+        "top_5_hit": calculate_top_k_hit_rate(predicted_ranks, actual_positions, k=5),
         "top_10_hit": calculate_top_k_hit_rate(predicted_ranks, actual_positions, k=10),
     }

@@ -12,6 +12,14 @@ from src.evaluation.metrics import (
 from src.evaluation.explainability import PredictionExplainer
 from src.evaluation.backtest import WalkForwardBacktester
 from src.evaluation.ablation import FeatureAblationStudy, FEATURE_GROUPS
+from src.evaluation.calibration import (
+    brier_score,
+    binary_log_loss,
+    multiclass_log_loss,
+    compute_reliability_curve,
+    TemperatureScaler,
+    ProbabilityCalibrationEvaluator,
+)
 
 __all__ = [
     "calculate_race_mae",
@@ -25,4 +33,10 @@ __all__ = [
     "WalkForwardBacktester",
     "FeatureAblationStudy",
     "FEATURE_GROUPS",
+    "brier_score",
+    "binary_log_loss",
+    "multiclass_log_loss",
+    "compute_reliability_curve",
+    "TemperatureScaler",
+    "ProbabilityCalibrationEvaluator",
 ]

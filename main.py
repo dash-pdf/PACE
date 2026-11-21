@@ -64,6 +64,17 @@ def main() -> int:
         help="Execute Phase 4 baseline race simulation for target event",
     )
     parser.add_argument(
+        "--monte-carlo",
+        action="store_true",
+        help="Execute Phase 4 Stage 6 Monte Carlo simulation with probabilistic calibration",
+    )
+    parser.add_argument(
+        "--simulations",
+        type=int,
+        default=500,
+        help="Number of Monte Carlo simulations to execute (default: 500)",
+    )
+    parser.add_argument(
         "--laps",
         type=int,
         default=58,
@@ -463,6 +474,115 @@ def main() -> int:
         print("\nFastest Laps Recorded:")
         for _, fl in fastest_laps.iterrows():
             print(f"  * Lap {int(fl['lap'])}: {fl['driver_id']} ({fl['constructor_id']}) — {fl['lap_time']:.3f}s")
+        return 0
+
+    if args.monte_carlo:
+        import pandas as pd
+        import numpy as np
+        from src.features.pipeline import FeaturePipeline
+        from src.models.statistical import RidgePositionRegressor
+        from src.models.ranker import XGBoostLambdaMARTRanker
+        from src.simulation.monte_carlo import MonteCarloSimulationEngine
+        from src.simulation.realism import SimulationRealismAuditor
+        from src.evaluation.calibration import ProbabilityCalibrationEvaluator
+
+        print(f"\nInitializing Phase 4 Stage 6 Monte Carlo Simulator: Season {args.target_season} Round {args.target_round} (Horizon: {args.horizon})...")
+        print(f"Sampling {args.simulations} Stochastic Event-Driven Grand Prix Simulations...")
+
+        rr = pd.read_parquet("data/historical/historical_race_results.parquet")
+        q = pd.read_parquet("data/historical/historical_qualifying.parquet")
+        laps = pd.read_parquet("data/historical/historical_laps.parquet")
+        app = pd.read_parquet("data/historical/driver_circuit/driver_circuit_appearances.parquet")
+        circ = pd.read_parquet("data/historical/driver_circuit/circuit_characteristics.parquet")
+
+        pipeline = FeaturePipeline(rr, q, laps, app, circ)
+        event_df = pipeline.compile_features_for_event(
+            season=args.target_season,
+            round_num=args.target_round,
+            horizon=args.horizon,
+        )
+
+        if event_df.empty:
+            print(f"Error: No data available for Season {args.target_season} Round {args.target_round}")
+            return 1
+
+        feature_cols = [
+            "dpi_rating", "dpi_uncertainty", "driver_starts", "cpi_pole_gap_pct",
+            "cpi_reliability", "circuit_affinity_mean", "circuit_length_km",
+            "grid_position", "grid_x_overtaking",
+        ]
+
+        all_events = rr[["season", "round"]].drop_duplicates().sort_values(["season", "round"]).values
+        prior_events = [
+            (int(s), int(r)) for s, r in all_events
+            if (s < args.target_season) or (s == args.target_season and r < args.target_round)
+        ]
+
+        train_dfs = [pipeline.compile_features_for_event(s, r, horizon=args.horizon) for s, r in prior_events[:15]]
+        train_dfs = [df for df in train_dfs if not df.empty]
+        full_train = pd.concat(train_dfs, ignore_index=True)
+
+        ridge = RidgePositionRegressor().fit(full_train[feature_cols].fillna(0.0), full_train["target_rank"].values)
+        raw_pred = ridge.model.predict(ridge.scaler.transform(event_df[feature_cols].fillna(0.0)))
+        event_df["predicted_utility"] = -raw_pred
+
+        circuit_id = event_df["circuit_id"].iloc[0] if "circuit_id" in event_df.columns else "albert_park"
+        circuit_length = float(event_df["circuit_length_km"].iloc[0]) if "circuit_length_km" in event_df.columns else 5.278
+        tyre_stress = float(event_df["tyre_stress_level"].iloc[0]) if "tyre_stress_level" in event_df.columns else 3.0
+        base_lap_time = 82.0 if circuit_id == "albert_park" else 88.0
+
+        mc_engine = MonteCarloSimulationEngine(utility_scaling_factor=0.05, n_jobs=-1)
+        mc_result = mc_engine.run_simulations(
+            event_features=event_df,
+            n_simulations=args.simulations,
+            total_laps=args.laps,
+            circuit_id=circuit_id,
+            circuit_length_km=circuit_length,
+            base_lap_time=base_lap_time,
+            tyre_stress_level=tyre_stress,
+            random_seed=42,
+        )
+
+        df_mc = mc_result.to_dataframe()
+
+        print("\n" + "=" * 135)
+        print(f"PACE STAGE 6: MONTE CARLO PROBABILISTIC PREDICTIONS — {circuit_id.replace('_', ' ').upper()} ({args.simulations} RUNS)")
+        print("=" * 135)
+        disp_cols = [
+            "predicted_rank", "driver_id", "constructor_id", "grid_position",
+            "expected_position", "most_likely_position", "p05", "p95",
+            "p_win", "p_podium", "p_top5", "p_points", "p_dnf_mech", "p_dnf_inc", "p_dnf_total", "mcse_win",
+        ]
+        print(df_mc[disp_cols].to_string(index=False))
+
+        print("\n" + "=" * 80)
+        print("GRID-LEVEL MATHEMATICAL CONSISTENCY VERIFICATION:")
+        print("=" * 80)
+        math_check = mc_result.verify_mathematical_consistency()
+        for k, v in math_check.items():
+            print(f"  - {k}: {v}")
+
+        print("\n" + "=" * 80)
+        print("MACRO SIMULATION REALISM & EVENT FREQUENCY AUDIT:")
+        print("=" * 80)
+        audit = SimulationRealismAuditor.audit_event_frequencies(mc_result)
+        print(f"All Frequencies Plausible: {audit['all_frequencies_plausible']}")
+        for ev, stats in audit["detailed_audit"].items():
+            print(f"  * {ev:<26}: Sim={stats['simulated_mean']:<6} | F1 Norm={stats['historical_norm']:<5} | Range={stats['plausible_range']} | InRange={stats['in_plausible_range']}")
+
+        stability = SimulationRealismAuditor.evaluate_distribution_stability(mc_result.convergence_traces)
+        print(f"\nDistribution Convergence: {stability['diagnostics']}")
+        print(f"  * Max Win Prob Shift: {stability['max_win_probability_shift']:.4f}")
+        print(f"  * Max Podium Prob Shift: {stability['max_podium_probability_shift']:.4f}")
+
+        if "finish_position" in event_df.columns and event_df["finish_position"].notna().any():
+            print("\n" + "=" * 80)
+            print("PROBABILITY CALIBRATION EVALUATION (VS OUT-OF-SAMPLE ACTUALS):")
+            print("=" * 80)
+            calib = ProbabilityCalibrationEvaluator.evaluate_monte_carlo_race(event_df, mc_result)
+            for k, v in calib.items():
+                print(f"  - {k}: {v:.4f}" if isinstance(v, float) else f"  - {k}: {v}")
+
         return 0
 
     # Default action if no flags provided
