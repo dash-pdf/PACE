@@ -15,6 +15,8 @@ from src.data.schemas import (
     DRIVER_CIRCUIT_APPEARANCES_SCHEMA,
     DRIVER_CIRCUIT_AGGREGATED_SCHEMA,
     CIRCUIT_CHARACTERISTICS_SCHEMA,
+    DRIVER_STANDINGS_SCHEMA,
+    CONSTRUCTOR_STANDINGS_SCHEMA,
 )
 from src.data.fastf1_collector import FastF1Collector, parse_time_to_ms, classify_status, extract_df
 from src.data.driver_circuit import DriverCircuitIntelligence, get_regulation_era, CIRCUIT_METRICS
@@ -63,6 +65,19 @@ from src.data.canonical_registry import (
     get_canonical_constructor_id,
     get_canonical_circuit_id,
 )
+from src.data.kaggle_importer import (
+    KaggleAcquisitionManager,
+    KaggleImporter,
+    HistoricalDataReconciler,
+    HistoricalIntelligenceExpander,
+    run_kaggle_historical_integration,
+    KaggleInventory,
+    KaggleTableInventory,
+    ReconciliationReport,
+    ReconciliationConflict,
+    DataQualityReport,
+    KaggleImportResult,
+)
 
 __all__ = [
     "DRIVERS_SCHEMA",
@@ -79,6 +94,8 @@ __all__ = [
     "DRIVER_CIRCUIT_APPEARANCES_SCHEMA",
     "DRIVER_CIRCUIT_AGGREGATED_SCHEMA",
     "CIRCUIT_CHARACTERISTICS_SCHEMA",
+    "DRIVER_STANDINGS_SCHEMA",
+    "CONSTRUCTOR_STANDINGS_SCHEMA",
     "FastF1Collector",
     "DriverCircuitIntelligence",
     "get_regulation_era",
@@ -125,4 +142,15 @@ __all__ = [
     "get_canonical_driver_id",
     "get_canonical_constructor_id",
     "get_canonical_circuit_id",
+    "KaggleAcquisitionManager",
+    "KaggleImporter",
+    "HistoricalDataReconciler",
+    "HistoricalIntelligenceExpander",
+    "run_kaggle_historical_integration",
+    "KaggleInventory",
+    "KaggleTableInventory",
+    "ReconciliationReport",
+    "ReconciliationConflict",
+    "DataQualityReport",
+    "KaggleImportResult",
 ]

@@ -285,3 +285,29 @@ CIRCUIT_CHARACTERISTICS_SCHEMA = pa.schema([
     ("source_api", pa.string()),
     ("retrieved_at", pa.string()),
 ])
+
+# Driver Standings Schema (Championship progression)
+DRIVER_STANDINGS_SCHEMA = pa.schema([
+    ("season", pa.int32()),
+    ("round", pa.int32()),
+    ("driver_id", pa.string()),
+    ("points", pa.float64()),
+    ("position", pa.int32()),
+    ("position_text", pa.string()),
+    ("wins", pa.int32()),
+    ("source_api", pa.string()),
+    ("retrieved_at", pa.string()),
+])
+
+# Constructor Standings Schema (Championship progression)
+CONSTRUCTOR_STANDINGS_SCHEMA = pa.schema([
+    ("season", pa.int32()),
+    ("round", pa.int32()),
+    ("constructor_id", pa.string()),
+    ("points", pa.float64()),
+    ("position", pa.int32()),
+    ("position_text", pa.string()),
+    ("wins", pa.int32()),
+    ("source_api", pa.string()),
+    ("retrieved_at", pa.string()),
+])

@@ -197,7 +197,11 @@ class FeaturePipeline:
             speed_x_length = (1.0 - c_pole_gap) * circuit_topo["circuit_length_km"]
 
             # Actual outcomes (Labels for supervised training)
-            finish_pos = float(race_row["finish_position"]) if race_row.get("finish_position") is not None else 20.0
+            fin_val = race_row.get("finish_position")
+            if fin_val is not None and pd.notna(fin_val) and float(fin_val) > 0:
+                finish_pos = float(fin_val)
+            else:
+                finish_pos = 20.0
             is_classified = bool(race_row.get("is_classified", False))
             is_dnf = bool(race_row.get("is_dnf", False))
 

@@ -133,8 +133,19 @@ class WalkForwardBacktester:
         )
 
         if test_events is None:
-            # Use all events after min_train_events warm-up
-            eval_events = [(int(s), int(r)) for s, r in all_events[self.min_train_events:]]
+            # Candidate test events must have a viable grid (at least 10 drivers)
+            all_event_tuples = [(int(s), int(r)) for s, r in all_events[self.min_train_events:]]
+            candidate_events = []
+            for s, r in all_event_tuples:
+                event_cnt = len(
+                    self.pipeline.race_results[
+                        (self.pipeline.race_results["season"] == s) &
+                        (self.pipeline.race_results["round"] == r)
+                    ]
+                )
+                if event_cnt >= 10:
+                    candidate_events.append((s, r))
+            eval_events = candidate_events
         else:
             eval_events = test_events
 
@@ -331,7 +342,10 @@ class WalkForwardBacktester:
 
             summary_rows.append(summary_row)
 
-        summary_df = pd.DataFrame(summary_rows).sort_values("MAE_Mean")
+        if summary_rows:
+            summary_df = pd.DataFrame(summary_rows).sort_values("MAE_Mean")
+        else:
+            summary_df = pd.DataFrame(columns=["Model", "MAE_Mean", "MAE_Std", "NDCG@5_Mean", "KendallTau_Mean"])
 
         # 7. Significance testing
         grid_maes = [m["mae"] for m in model_race_metrics["Baseline_GridOrder"]]

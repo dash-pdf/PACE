@@ -164,6 +164,7 @@ class CanonicalEntityRegistry:
         self._drivers: Dict[str, CanonicalDriver] = {}
         self._driver_by_code: Dict[str, str] = {}
         self._driver_by_alias: Dict[str, str] = {}
+        self._driver_ambiguous_aliases: Dict[str, Set[str]] = {}
         # (permanent_number, season) -> canonical_id; fallback number -> canonical_id
         self._driver_by_number_season: Dict[Tuple[int, int], str] = {}
         self._driver_by_number_default: Dict[int, str] = {}
@@ -171,10 +172,12 @@ class CanonicalEntityRegistry:
         # Constructor indices
         self._constructors: Dict[str, CanonicalConstructor] = {}
         self._constructor_by_alias: Dict[str, str] = {}
+        self._constructor_ambiguous_aliases: Dict[str, Set[str]] = {}
 
         # Circuit indices
         self._circuits: Dict[str, CanonicalCircuit] = {}
         self._circuit_by_alias: Dict[str, str] = {}
+        self._circuit_ambiguous_aliases: Dict[str, Set[str]] = {}
         self._circuit_by_tum: Dict[str, str] = {}
         self._circuit_by_openf1: Dict[str, str] = {}
 
@@ -189,6 +192,49 @@ class CanonicalEntityRegistry:
     # Registration Methods
     # -----------------------------------------------------------------------
 
+    def _index_driver_alias(self, norm_a: str, c_id: str) -> None:
+        """Index a driver alias with collision and ambiguity tracking."""
+        if not norm_a:
+            return
+        if norm_a in self._driver_ambiguous_aliases:
+            self._driver_ambiguous_aliases[norm_a].add(c_id)
+        elif norm_a in self._driver_by_alias:
+            existing = self._driver_by_alias[norm_a]
+            if existing != c_id:
+                # Mark as ambiguous rather than silently overwriting
+                self._driver_ambiguous_aliases[norm_a] = {existing, c_id}
+                del self._driver_by_alias[norm_a]
+        else:
+            self._driver_by_alias[norm_a] = c_id
+
+    def _index_constructor_alias(self, norm_a: str, c_id: str) -> None:
+        """Index a constructor alias with collision and ambiguity tracking."""
+        if not norm_a:
+            return
+        if norm_a in self._constructor_ambiguous_aliases:
+            self._constructor_ambiguous_aliases[norm_a].add(c_id)
+        elif norm_a in self._constructor_by_alias:
+            existing = self._constructor_by_alias[norm_a]
+            if existing != c_id:
+                self._constructor_ambiguous_aliases[norm_a] = {existing, c_id}
+                del self._constructor_by_alias[norm_a]
+        else:
+            self._constructor_by_alias[norm_a] = c_id
+
+    def _index_circuit_alias(self, norm_a: str, c_id: str) -> None:
+        """Index a circuit alias with collision and ambiguity tracking."""
+        if not norm_a:
+            return
+        if norm_a in self._circuit_ambiguous_aliases:
+            self._circuit_ambiguous_aliases[norm_a].add(c_id)
+        elif norm_a in self._circuit_by_alias:
+            existing = self._circuit_by_alias[norm_a]
+            if existing != c_id:
+                self._circuit_ambiguous_aliases[norm_a] = {existing, c_id}
+                del self._circuit_by_alias[norm_a]
+        else:
+            self._circuit_by_alias[norm_a] = c_id
+
     def register_driver(self, driver: CanonicalDriver, season_numbers: Optional[Dict[int, int]] = None) -> None:
         """Register a canonical driver and construct bidirectional lookup indices."""
         c_id = driver.canonical_id
@@ -198,23 +244,23 @@ class CanonicalEntityRegistry:
         self._drivers[c_id] = driver
 
         # Index by canonical_id normalized
-        self._driver_by_alias[normalize_key(c_id)] = c_id
+        self._index_driver_alias(normalize_key(c_id), c_id)
 
         # Index by 3-letter code
         if driver.code:
             code_clean = driver.code.strip().upper()
             self._driver_by_code[code_clean] = c_id
-            self._driver_by_alias[normalize_key(code_clean)] = c_id
+            self._index_driver_alias(normalize_key(code_clean), c_id)
 
         # Index by Ergast ID
         if driver.ergast_id:
-            self._driver_by_alias[normalize_key(driver.ergast_id)] = c_id
+            self._index_driver_alias(normalize_key(driver.ergast_id), c_id)
 
         # Index by full name, given name + family name
         if driver.full_name:
-            self._driver_by_alias[normalize_key(driver.full_name)] = c_id
+            self._index_driver_alias(normalize_key(driver.full_name), c_id)
         if driver.family_name:
-            self._driver_by_alias[normalize_key(driver.family_name)] = c_id
+            self._index_driver_alias(normalize_key(driver.family_name), c_id)
 
         # Index by permanent number
         if driver.permanent_number > 0:
@@ -230,66 +276,49 @@ class CanonicalEntityRegistry:
 
         # Index all declared aliases
         for alias in driver.aliases:
-            norm_a = normalize_key(alias)
-            if norm_a:
-                existing = self._driver_by_alias.get(norm_a)
-                if existing and existing != c_id:
-                    logger.warning(
-                        f"Alias collision for driver '{alias}': already mapped to '{existing}', "
-                        f"overriding with '{c_id}'"
-                    )
-                self._driver_by_alias[norm_a] = c_id
+            self._index_driver_alias(normalize_key(alias), c_id)
 
     def register_constructor(self, constructor: CanonicalConstructor) -> None:
         """Register a canonical constructor and construct alias indices."""
         c_id = constructor.canonical_id
         self._constructors[c_id] = constructor
 
-        self._constructor_by_alias[normalize_key(c_id)] = c_id
+        self._index_constructor_alias(normalize_key(c_id), c_id)
         if constructor.name:
-            self._constructor_by_alias[normalize_key(constructor.name)] = c_id
+            self._index_constructor_alias(normalize_key(constructor.name), c_id)
         if constructor.ergast_id:
-            self._constructor_by_alias[normalize_key(constructor.ergast_id)] = c_id
+            self._index_constructor_alias(normalize_key(constructor.ergast_id), c_id)
         if constructor.fastf1_name:
-            self._constructor_by_alias[normalize_key(constructor.fastf1_name)] = c_id
+            self._index_constructor_alias(normalize_key(constructor.fastf1_name), c_id)
 
         for alias in constructor.aliases:
-            norm_a = normalize_key(alias)
-            if norm_a:
-                existing = self._constructor_by_alias.get(norm_a)
-                if existing and existing != c_id:
-                    logger.warning(
-                        f"Constructor alias collision: '{alias}' mapped to '{existing}', overriding with '{c_id}'"
-                    )
-                self._constructor_by_alias[norm_a] = c_id
+            self._index_constructor_alias(normalize_key(alias), c_id)
 
     def register_circuit(self, circuit: CanonicalCircuit) -> None:
         """Register a canonical circuit and construct alias indices."""
         c_id = circuit.canonical_id
         self._circuits[c_id] = circuit
 
-        self._circuit_by_alias[normalize_key(c_id)] = c_id
+        self._index_circuit_alias(normalize_key(c_id), c_id)
         if circuit.name:
-            self._circuit_by_alias[normalize_key(circuit.name)] = c_id
+            self._index_circuit_alias(normalize_key(circuit.name), c_id)
         if circuit.ergast_id:
-            self._circuit_by_alias[normalize_key(circuit.ergast_id)] = c_id
+            self._index_circuit_alias(normalize_key(circuit.ergast_id), c_id)
         if circuit.fastf1_id:
-            self._circuit_by_alias[normalize_key(circuit.fastf1_id)] = c_id
+            self._index_circuit_alias(normalize_key(circuit.fastf1_id), c_id)
         if circuit.locality:
-            self._circuit_by_alias[normalize_key(circuit.locality)] = c_id
+            self._index_circuit_alias(normalize_key(circuit.locality), c_id)
 
         if circuit.tum_id:
             self._circuit_by_tum[circuit.tum_id] = c_id
-            self._circuit_by_alias[normalize_key(circuit.tum_id)] = c_id
+            self._index_circuit_alias(normalize_key(circuit.tum_id), c_id)
 
         if circuit.openf1_key:
             self._circuit_by_openf1[str(circuit.openf1_key)] = c_id
-            self._circuit_by_alias[normalize_key(circuit.openf1_key)] = c_id
+            self._index_circuit_alias(normalize_key(circuit.openf1_key), c_id)
 
         for alias in circuit.aliases:
-            norm_a = normalize_key(alias)
-            if norm_a:
-                self._circuit_by_alias[norm_a] = c_id
+            self._index_circuit_alias(normalize_key(alias), c_id)
 
     def register_event(self, event: CanonicalEvent) -> None:
         """Register a canonical Grand Prix event."""
@@ -337,6 +366,13 @@ class CanonicalEntityRegistry:
 
         # 4. Normalized alias / name match
         norm_q = normalize_key(q_str)
+        if norm_q in self._driver_ambiguous_aliases:
+            matches = sorted(list(self._driver_ambiguous_aliases[norm_q]))
+            err_msg = f"Ambiguous driver query '{query}' matched multiple drivers: {matches}"
+            if strict:
+                raise AmbiguousEntityError("driver", query, matches, err_msg)
+            return ResolutionResult(None, None, False, query, "ambiguous", err_msg)
+
         if norm_q in self._driver_by_alias:
             c_id = self._driver_by_alias[norm_q]
             return ResolutionResult(c_id, self._drivers[c_id], True, query, "alias", None)
@@ -366,6 +402,13 @@ class CanonicalEntityRegistry:
 
         # 2. Normalized alias / name match
         norm_q = normalize_key(q_str)
+        if norm_q in self._constructor_ambiguous_aliases:
+            matches = sorted(list(self._constructor_ambiguous_aliases[norm_q]))
+            err_msg = f"Ambiguous constructor query '{query}' matched multiple constructors: {matches}"
+            if strict:
+                raise AmbiguousEntityError("constructor", query, matches, err_msg)
+            return ResolutionResult(None, None, False, query, "ambiguous", err_msg)
+
         if norm_q in self._constructor_by_alias:
             c_id = self._constructor_by_alias[norm_q]
             return ResolutionResult(c_id, self._constructors[c_id], True, query, "alias", None)
@@ -404,6 +447,13 @@ class CanonicalEntityRegistry:
 
         # 4. Normalized alias / locality / grand prix name match
         norm_q = normalize_key(q_str)
+        if norm_q in self._circuit_ambiguous_aliases:
+            matches = sorted(list(self._circuit_ambiguous_aliases[norm_q]))
+            err_msg = f"Ambiguous circuit query '{query}' matched multiple circuits: {matches}"
+            if strict:
+                raise AmbiguousEntityError("circuit", query, matches, err_msg)
+            return ResolutionResult(None, None, False, query, "ambiguous", err_msg)
+
         if norm_q in self._circuit_by_alias:
             c_id = self._circuit_by_alias[norm_q]
             return ResolutionResult(c_id, self._circuits[c_id], True, query, "alias", None)
