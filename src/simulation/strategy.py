@@ -58,38 +58,63 @@ class StrategyEngine:
         total_laps: int,
         grid_position: int,
         circuit_tyre_stress: float = 3.0,
+        driver_deg_rate: Optional[float] = None,
+        pace_advantage: Optional[float] = None,
+        available_compounds: Optional[List[CompoundType]] = None,
+        strategy_archetype: Optional[str] = None,
     ) -> StintPlan:
-        """Generate a realistic baseline strategy complying with FIA Article 30.5.
-        
-        High stress circuits (> 3.5) trigger a 2-stop strategy; otherwise optimal 1-stop.
+        """Generate a realistic, context-dependent strategy complying with 2026 FIA Article B6.3.6.
+
+        Strategy choices emerge naturally from:
+        1. Circuit tyre stress & degradation rates (high stress/deg triggers 2-stop).
+        2. Grid position & track position priorities (clean air vs traffic overcut).
+        3. Pace offset / overtaking potential (aggressive 2-stop for fast cars out of position).
+        4. Tyre allocation constraints (restricted available sets).
         """
-        if circuit_tyre_stress > 3.8:
-            # 2-Stop: Soft -> Hard -> Medium or Medium -> Hard -> Medium
-            stint1 = max(12, int(total_laps * 0.28))
-            stint2 = max(15, int(total_laps * 0.38))
+        # 1. High Degradation / High Stress Archetype: 2-Stop
+        is_high_deg = circuit_tyre_stress > 3.6 or (driver_deg_rate is not None and driver_deg_rate >= 0.075)
+        is_fast_out_of_position = grid_position >= 15 and pace_advantage is not None and pace_advantage >= 0.40
+
+        if strategy_archetype == "2stop" or is_high_deg or is_fast_out_of_position:
+            # 2-Stop: Medium -> Hard -> Medium (or Soft -> Hard -> Medium)
+            stint1 = max(11, int(total_laps * 0.28))
+            stint2 = max(14, int(total_laps * 0.38))
             stint3 = total_laps - (stint1 + stint2)
-            return StintPlan(
-                compounds=[CompoundType.MEDIUM, CompoundType.HARD, CompoundType.SOFT],
-                stint_lengths=[stint1, stint2, stint3],
-            )
+            c1 = CompoundType.SOFT if is_fast_out_of_position else CompoundType.MEDIUM
+            c2 = CompoundType.HARD
+            c3 = CompoundType.MEDIUM
+            compounds = [c1, c2, c3]
+            stints = [stint1, stint2, stint3]
+
+        elif strategy_archetype == "inverted_1stop" or (grid_position in (10, 12, 14, 16, 18, 20)):
+            # Midfield alternative / inverted strategy: Hard -> Medium
+            # Enables long initial stint to cycle into clean air when early Medium-starters pit
+            stint1 = max(24, int(total_laps * 0.56))
+            stint2 = total_laps - stint1
+            compounds = [CompoundType.HARD, CompoundType.MEDIUM]
+            stints = [stint1, stint2]
+
         else:
-            # Standard 1-Stop: Medium -> Hard (or alternate Hard -> Medium for back half of grid)
-            if grid_position <= 10:
-                # Top 10 prefer Medium -> Hard
-                stint1 = max(18, int(total_laps * 0.42))
-                stint2 = total_laps - stint1
-                return StintPlan(
-                    compounds=[CompoundType.MEDIUM, CompoundType.HARD],
-                    stint_lengths=[stint1, stint2],
-                )
-            else:
-                # Alternative strategy for midfield/backmarkers: Hard -> Medium
-                stint1 = max(24, int(total_laps * 0.55))
-                stint2 = total_laps - stint1
-                return StintPlan(
-                    compounds=[CompoundType.HARD, CompoundType.MEDIUM],
-                    stint_lengths=[stint1, stint2],
-                )
+            # Standard Conventional 1-Stop: Medium -> Hard
+            # Preferred by front-runners and balanced qualifiers
+            stint1 = max(18, int(total_laps * 0.42))
+            stint2 = total_laps - stint1
+            compounds = [CompoundType.MEDIUM, CompoundType.HARD]
+            stints = [stint1, stint2]
+
+        # Enforce available compounds allocation if constrained
+        if available_compounds is not None and len(available_compounds) >= 2:
+            filtered_compounds = []
+            for c in compounds:
+                if c in available_compounds:
+                    filtered_compounds.append(c)
+                else:
+                    # Pick first available distinct compound
+                    alt = next((ac for ac in available_compounds if ac != c), available_compounds[0])
+                    filtered_compounds.append(alt)
+            compounds = filtered_compounds
+
+        return StintPlan(compounds=compounds, stint_lengths=stints)
 
     def should_pit_now(
         self,
@@ -124,13 +149,21 @@ class StrategyEngine:
             stint_deg_rate=stint_deg_rate,
         )
         if tyre_delta >= 2.20 and car.tyre_age >= 10:
+            # If early in the race on a planned 1-stop, dynamically transition to 2-stop
+            if len(stint_plan.compounds) == 2 and race.current_lap < int(race.total_laps * 0.48):
+                stint_plan.compounds.append(CompoundType.MEDIUM)
+                rem = race.total_laps - race.current_lap
+                stint_plan.stint_lengths = [race.current_lap, int(rem * 0.52), rem - int(rem * 0.52)]
             return True
 
         # 2. Opportunistic Safety Car / VSC Pit Stop:
-        # Under SC/VSC, pit loss is halved. If tyres have >= 12 laps of wear and race is neutralised:
+        # Under SC/VSC, pit loss is reduced by ~45% (~10-12s advantage on track).
         is_neutralised = race.race_mode in (RaceMode.SAFETY_CAR, RaceMode.VSC)
-        if is_neutralised and car.tyre_age >= max(10, int(profile.cliff_lap * 0.45)):
-            # Cheap pit stop saves ~10s of track delta!
+        if is_neutralised and car.tyre_age >= max(8, int(profile.cliff_lap * 0.35)):
+            if len(stint_plan.compounds) == 2 and race.current_lap < int(race.total_laps * 0.50):
+                # Adjust remaining stint
+                rem = race.total_laps - race.current_lap
+                stint_plan.stint_lengths = [race.current_lap, rem]
             return True
 
         # 3. Scheduled Pit Lap from Stint Plan

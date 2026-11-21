@@ -69,6 +69,10 @@ class CarState:
     status: CarStatus = CarStatus.ACTIVE
     retirement_lap: Optional[int] = None
     last_lap_time: float = 0.0
+    drs_active: bool = False
+    overtakes_made: int = 0
+    times_overtaken: int = 0
+    times_lapped: int = 0
     lap_times_history: List[float] = field(default_factory=list)
     positions_history: List[int] = field(default_factory=list)
 

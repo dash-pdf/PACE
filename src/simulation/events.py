@@ -17,6 +17,7 @@ from typing import Any, Callable, Dict, List, Optional
 class EventType(str, Enum):
     LAP_COMPLETED = "lap_completed"
     OVERTAKE = "overtake"
+    LAPPED = "lapped"
     PIT_STOP = "pit_stop"
     INCIDENT = "incident"
     MECHANICAL_FAILURE = "mechanical_failure"

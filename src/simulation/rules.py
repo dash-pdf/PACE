@@ -3,9 +3,12 @@
 Enforces official FIA Formula 1 sporting regulations:
 1. Article 54.1: A car is classified if and only if it completes >= 90% of winner's laps:
    L_i >= floor(0.90 * L_winner).
-2. Lapped cars completing >= 90% are classified finishers behind lead-lap finishers.
-3. Unclassified retirements (DNF) are ranked behind all classified finishers by laps completed.
-4. Strictly guarantees a valid, tie-free 1..N permutation finish order.
+2. 2026 Sporting Regulations Article B6.3.6: Mandatory use of at least two different
+   specifications of dry-weather tyres during the race. The wet exemption applies strictly
+   when a driver actually uses intermediate or wet-weather tyres during the race.
+3. Lapped cars completing >= 90% are classified finishers behind lead-lap finishers.
+4. Unclassified retirements (DNF) are ranked behind all classified finishers by laps completed.
+5. Strictly guarantees a valid, tie-free 1..N permutation finish order.
 """
 
 from __future__ import annotations
@@ -53,16 +56,16 @@ class FIAClassificationEngine:
         # 90% threshold for classification (FIA Sporting Code Article 54.1)
         min_classified_laps = math.floor(0.90 * winner_laps) if winner_laps > 0 else 0
 
-        # Enforce FIA Article 30.5: Mandatory use of at least 2 distinct dry compounds in dry race
-        # Exception: Waived if wet track condition (Damp/Wet) or if any intermediate/wet compound used
-        is_wet_race = race.track_condition in (TrackCondition.DAMP, TrackCondition.WET)
-
+        # Enforce 2026 FIA Sporting Regulations Article B6.3.6:
+        # Each competitor must use at least two different specifications of dry-weather tyres during the race.
+        # Exemption: Applies ONLY if intermediate or wet-weather tyres are actually used by the
+        # competitor during the race (not merely when the track condition is declared wet).
         for car in all_cars:
             if car.status in (CarStatus.ACTIVE, CarStatus.FINISHED):
-                has_wet_compound = any(c in ("intermediate", "wet") for c in car.compounds_used)
-                if not is_wet_race and not has_wet_compound:
+                has_used_wet_compound = any(c in ("intermediate", "wet") for c in car.compounds_used)
+                if not has_used_wet_compound:
                     dry_compounds = {c for c in car.compounds_used if c in ("soft", "medium", "hard")}
-                    # Only enforce if car actually completed at least 20 laps (avoid penalising early retirements)
+                    # Enforce if car completed classification distance
                     if len(dry_compounds) < 2 and car.laps_completed >= min_classified_laps:
                         car.status = CarStatus.DSQ
 
@@ -131,6 +134,7 @@ class FIAClassificationEngine:
                 "laps_completed": car.laps_completed,
                 "pit_stops": car.pit_stops_count,
                 "compounds": "/".join(sorted(car.compounds_used)),
+                "overtakes_made": car.overtakes_made,
                 "elapsed_time": round(total_time, 3),
                 "time_penalties": car.penalties_accrued,
                 "is_classified": is_class,

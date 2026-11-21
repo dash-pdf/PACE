@@ -19,6 +19,12 @@ from src.simulation.fuel import FuelModel
 from src.simulation.pit_model import PitStopModel, PitStopDurationResult
 from src.simulation.strategy import StrategyEngine, StintPlan
 from src.simulation.pace_model import StochasticPaceModel, BaselinePaceModel
+from src.simulation.traffic import (
+    TrafficOvertakingEngine,
+    CircuitDRSConfig,
+    CIRCUIT_DRS_PROFILES,
+    OvertakeAttemptResult,
+)
 from src.simulation.rules import FIAClassificationEngine
 from src.simulation.engine import BaselineRaceSimulator, SimulationResult
 
@@ -40,6 +46,10 @@ __all__ = [
     "PitStopDurationResult",
     "StrategyEngine",
     "StintPlan",
+    "TrafficOvertakingEngine",
+    "CircuitDRSConfig",
+    "CIRCUIT_DRS_PROFILES",
+    "OvertakeAttemptResult",
     "StochasticPaceModel",
     "BaselinePaceModel",
     "FIAClassificationEngine",
