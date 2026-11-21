@@ -16,6 +16,7 @@ import numpy as np
 
 from src.simulation.state import CarState, CarStatus, RaceMode, RaceState, TrackCondition
 from src.simulation.events import EventDispatcher, EventType, SimulationEvent
+from src.data.canonical_registry import resolve_circuit
 
 
 @dataclass(frozen=True)
@@ -261,7 +262,14 @@ class TrafficOvertakingEngine:
         self.profiles = profiles or CIRCUIT_DRS_PROFILES
 
     def get_circuit_config(self, circuit_id: str) -> CircuitDRSConfig:
-        return self.profiles.get(circuit_id, DEFAULT_DRS_CONFIG)
+        """Retrieve circuit DRS and overtaking profile using canonical entity resolution."""
+        resolved = resolve_circuit(circuit_id, strict=False)
+        c_id = resolved.canonical_id if resolved.is_resolved else str(circuit_id).strip().lower()
+        if c_id in self.profiles:
+            return self.profiles[c_id]
+        if str(circuit_id).strip().lower() in self.profiles:
+            return self.profiles[str(circuit_id).strip().lower()]
+        return DEFAULT_DRS_CONFIG
 
     def is_drs_eligible(
         self,

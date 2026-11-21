@@ -14,6 +14,8 @@ from typing import Dict, Optional
 import numpy as np
 import pandas as pd
 
+from src.data.canonical_registry import resolve_circuit
+
 
 @dataclass
 class PitStopDurationResult:
@@ -46,14 +48,18 @@ class PitStopModel:
         "spa": 22.0,
         "zandvoort": 19.5,
         "monza": 24.0,
-        "singapore": 28.0,  # 60 km/h limit in pit lane
+        "marina_bay": 28.0,  # 60 km/h limit in pit lane (canonical)
+        "singapore": 28.0,   # Alias for marina_bay
         "suzuka": 22.2,
         "losail": 23.0,
         "americas": 21.8,
         "rodriguez": 22.5,
         "interlagos": 21.0,
-        "las_vegas": 20.5,
+        "vegas": 20.5,       # Canonical Las Vegas identifier
+        "las_vegas": 20.5,   # Alias for vegas
         "yas_marina": 22.0,
+        "imola": 24.0,
+        "shanghai": 22.8,
     }
 
     def __init__(
@@ -95,9 +101,15 @@ class PitStopModel:
         """Get the base pit lane transit loss for a circuit.
         
         Under SC / VSC, cars on track run 35-45% slower, reducing the net pit delta by ~45%.
+        Uses CanonicalEntityRegistry to resolve aliases (e.g. 'vegas', 'las_vegas', 'singapore').
         """
-        c_id = circuit_id.lower()
-        base_transit = self.circuit_transit_times.get(c_id, 21.0)
+        resolved = resolve_circuit(circuit_id, strict=False)
+        c_id = resolved.canonical_id if resolved.is_resolved else str(circuit_id).strip().lower()
+
+        base_transit = self.circuit_transit_times.get(c_id)
+        if base_transit is None:
+            base_transit = self.circuit_transit_times.get(str(circuit_id).strip().lower(), 21.0)
+
         if is_sc_vsc:
             return base_transit * 0.55  # ~45% discount under SC / VSC
         return base_transit

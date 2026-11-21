@@ -19,6 +19,8 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from src.data.canonical_registry import resolve_circuit
+
 
 @dataclass
 class CircuitAffinityEstimate:
@@ -190,7 +192,12 @@ def extract_circuit_topology_features(
     circuit_id: str,
 ) -> Dict[str, float]:
     """Extract normalized physical circuit characteristics for feature vector interactions."""
-    c_row = circuit_characteristics_df[circuit_characteristics_df["circuit_id"] == circuit_id]
+    resolved = resolve_circuit(circuit_id, strict=False)
+    c_id = resolved.canonical_id if resolved.is_resolved else str(circuit_id).strip().lower()
+
+    c_row = circuit_characteristics_df[circuit_characteristics_df["circuit_id"] == c_id]
+    if c_row.empty:
+        c_row = circuit_characteristics_df[circuit_characteristics_df["circuit_id"] == str(circuit_id).strip().lower()]
     if c_row.empty:
         return {
             "circuit_length_km": 5.0,
