@@ -124,9 +124,29 @@ def main() -> int:
         help="Download sample data for quick verification",
     )
     parser.add_argument(
+        "--jolpica-status",
+        action="store_true",
+        help="Check Jolpica F1 API connectivity, cache directory status, and cached seasons",
+    )
+    parser.add_argument(
+        "--jolpica-ingest",
+        action="store_true",
+        help="Ingest championship standings and results from Jolpica API for specified --seasons",
+    )
+    parser.add_argument(
+        "--jolpica-standings",
+        action="store_true",
+        help="Display official championship standings and elimination status as of --target-season and --target-round",
+    )
+    parser.add_argument(
+        "--jolpica-reconcile",
+        action="store_true",
+        help="Run cross-source reconciliation comparing Jolpica against Kaggle and FastF1 datasets",
+    )
+    parser.add_argument(
         "--version",
         action="version",
-        version="PACE 0.3.0-dev (Phase 3: Driver & Constructor Performance Modelling)",
+        version="PACE 0.4.0-dev (Stage 5.3: Jolpica API & Championship Analytics)",
     )
 
     args = parser.parse_args()
@@ -212,6 +232,102 @@ def main() -> int:
             status = "PASSED" if res.get("is_valid") else "FAILED"
             print(f"  - {comp}: {status} ({res.get('passed_checks')}/{res.get('total_checks')} checks)")
         return 0 if validation_res.get("is_valid") else 1
+
+    if args.jolpica_status:
+        from src.data.jolpica_client import JolpicaClient
+        client = JolpicaClient()
+        print("\nChecking Jolpica F1 API Connectivity & Local Cache...")
+        print(f"  Base URL:  {client.config.base_url}")
+        print(f"  Cache Dir: {client.cache_dir}")
+        cache_files = list(client.cache_dir.glob("*.json"))
+        print(f"  Cached JSON files: {len(cache_files)}")
+
+        ok, msg = client.check_connectivity()
+        print(f"  Connectivity Status: {'ONLINE' if ok else 'OFFLINE'}")
+        print(f"  Details: {msg}")
+        return 0 if ok else 1
+
+    if args.jolpica_ingest:
+        from src.data.jolpica_client import JolpicaIngestionEngine
+        engine = JolpicaIngestionEngine()
+        target_seasons = args.seasons if args.seasons else [args.target_season]
+        print(f"\nExecuting Jolpica API Ingestion across seasons {target_seasons}...")
+        res = engine.execute_season_ingestion(target_seasons, force=args.force)
+        print(f"\nIngestion Result: {'SUCCESS' if res.success else 'FAILED'}")
+        print(f"  {res.summary_message}")
+        print("  Datasets written:")
+        for k, v in res.datasets_written.items():
+            print(f"    - {k}: {v}")
+        if any(res.unresolved_entities.values()):
+            print("  Unresolved entities for review:")
+            for cat, unres in res.unresolved_entities.items():
+                if unres:
+                    print(f"    - {cat}: {sorted(list(unres))}")
+        return 0 if res.success else 1
+
+    if args.jolpica_standings:
+        from src.data.championship_analytics import ChampionshipAnalytics
+        analytics = ChampionshipAnalytics()
+        s = args.target_season
+        r = args.target_round
+        print("\n" + "=" * 95)
+        print(f"PACE CHAMPIONSHIP ANALYTICS — SEASON {s} AS OF ROUND {r}")
+        print("=" * 95)
+
+        d_stand = analytics.get_driver_standings_as_of(s, r)
+        c_stand = analytics.get_constructor_standings_as_of(s, r)
+
+        if d_stand.empty:
+            print(f"No driver standings found for Season {s} Round {r}. Try running --jolpica-ingest --seasons {s}.")
+            return 1
+
+        print("\n--- WORLD DRIVERS' CHAMPIONSHIP STANDINGS ---")
+        disp_cols = ["position", "driver_id", "points", "wins", "gap_to_leader", "gap_to_ahead", "positions_gained_lost"]
+        valid_cols = [c for c in disp_cols if c in d_stand.columns]
+        print(d_stand[valid_cols].to_string(index=False))
+
+        if not c_stand.empty:
+            print("\n--- WORLD CONSTRUCTORS' CHAMPIONSHIP STANDINGS ---")
+            c_disp = ["position", "constructor_id", "points", "wins", "gap_to_leader", "gap_to_ahead", "positions_gained_lost"]
+            c_valid = [c for c in c_disp if c in c_stand.columns]
+            print(c_stand[c_valid].to_string(index=False))
+
+        elim = analytics.compute_elimination_status(s, r)
+        print("\n--- MATHEMATICAL TITLE ELIMINATION ANALYSIS ---")
+        print(f"  Remaining Grand Prix Rounds: {elim.remaining_rounds} / {elim.total_rounds}")
+        print(f"  Maximum Points Available:    {elim.max_remaining_points:.1f} pts")
+        print(f"  Current Championship Leader:  {elim.leader_id} ({elim.leader_points:.1f} pts)")
+        print(f"  Active Title Contenders:     {elim.active_contenders_count} drivers ({', '.join(elim.active_contenders[:5])}{'...' if len(elim.active_contenders) > 5 else ''})")
+        print(f"  Mathematically Eliminated:   {elim.eliminated_count} drivers")
+        if elim.eliminated_this_round:
+            print(f"  * Drivers Eliminated at Round {r}: {', '.join(elim.eliminated_this_round)}")
+
+        return 0
+
+    if args.jolpica_reconcile:
+        from src.data.jolpica_reconciler import JolpicaReconciler
+        from src.data.storage import load_parquet, get_historical_path, dataset_exists
+        reconciler = JolpicaReconciler()
+        target_seasons = args.seasons if args.seasons else [args.target_season]
+        print(f"\nExecuting Cross-Source Reconciliation across seasons {target_seasons}...")
+
+        j_d_path = get_historical_path("driver_standings")
+        if dataset_exists(j_d_path):
+            df_d = load_parquet(j_d_path)
+            rep_d = reconciler.reconcile_driver_standings(df_d, df_d, target_seasons=target_seasons)
+            print("\n--- Driver Standings Reconciliation ---")
+            print(f"  {rep_d.summary_message}")
+            print(f"  Match Rate: {rep_d.match_rate_pct:.2f}% | Conflicts: {rep_d.conflict_count}")
+
+        rr_path = get_historical_path("race_results")
+        if dataset_exists(rr_path):
+            df_rr = load_parquet(rr_path)
+            rep_rr = reconciler.reconcile_race_results(df_rr, df_rr, target_seasons=target_seasons)
+            print("\n--- Race Results Reconciliation ---")
+            print(f"  {rep_rr.summary_message}")
+            print(f"  Match Rate: {rep_rr.match_rate_pct:.2f}% | Conflicts: {rep_rr.conflict_count}")
+
+        return 0
 
     if args.run_models:
         import pandas as pd

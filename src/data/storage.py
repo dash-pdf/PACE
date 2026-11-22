@@ -24,9 +24,37 @@ HISTORICAL_DIR = DEFAULT_BASE_DIR / "data" / "historical"
 def ensure_directories(base_dir: Optional[Path] = None) -> None:
     """Create data directories if they do not exist."""
     base = base_dir or DEFAULT_BASE_DIR
-    for sub in ["raw", "processed", "historical", "historical/driver_circuit"]:
+    for sub in [
+        "raw",
+        "raw/jolpica/cache",
+        "processed",
+        "historical",
+        "historical/driver_circuit",
+        "historical/jolpica",
+    ]:
         d = base / "data" / sub
         d.mkdir(parents=True, exist_ok=True)
+
+
+def get_jolpica_dir(base_dir: Optional[Path] = None) -> Path:
+    """Return destination path for Jolpica historical datasets."""
+    base = base_dir or DEFAULT_BASE_DIR
+    p = base / "data" / "historical" / "jolpica"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def get_jolpica_path(filename: str, base_dir: Optional[Path] = None) -> Path:
+    """Return destination file path within Jolpica historical directory."""
+    return get_jolpica_dir(base_dir=base_dir) / filename
+
+
+def get_jolpica_cache_dir(base_dir: Optional[Path] = None) -> Path:
+    """Return local disk cache directory for raw Jolpica API JSON responses."""
+    base = base_dir or DEFAULT_BASE_DIR
+    p = base / "data" / "raw" / "jolpica" / "cache"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
 
 
 def get_driver_circuit_dir(base_dir: Optional[Path] = None) -> Path:

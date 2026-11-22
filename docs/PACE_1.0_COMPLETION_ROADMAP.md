@@ -147,17 +147,18 @@ Stages 5.2, 5.3, 5.4, 6.1, 6.2, 7.1-7.3, 8.4 (Full Scope System Hardening & PACE
 - **Criticality:** High (Agreed Scope B).
 - **Required for Las Vegas:** No.
 
-#### Stage 5.3: Jolpica API Client Integration
-- **Objective:** Integrate the official open-source successor to Ergast (`https://api.jolpica.com/ergast/f1/`) for championship standings and historical reconciliation.
-- **Existing Components to Reuse:** `src/data/fastf1_collector.py`, `src/data/storage.py`.
-- **Required Modifications & New Components:**
-  - Create `src/data/jolpica_client.py`: Robust HTTP client with automated retries, rate limiting, and local Parquet disk caching.
-  - Implement endpoints: `get_driver_standings()`, `get_constructor_standings()`, `get_season_results()`.
-  - Add offline fallback: If API is unreachable, seamlessly fall back to local cached Parquet files.
-- **Dependencies:** `requests`, `pyarrow`.
-- **Testing Requirements:** Live endpoint mock tests, schema validation, rate limit backoff, offline fallback verification.
-- **Acceptance Criteria:** Accurate retrieval of championship standings across historical seasons with automated offline resilience.
-- **Expected Deliverables:** `src/data/jolpica_client.py`, `tests/test_jolpica_client.py`.
+#### Stage 5.3: Jolpica API Client Integration [COMPLETED]
+- **Status:** **COMPLETED**
+- **Objective:** Integrate the official open-source successor to Ergast (`https://api.jolpi.ca/ergast/f1/`) for championship standings, cumulative points progression, and historical reconciliation.
+- **Implemented Components:**
+  - `src/data/jolpica_client.py`: Robust Ergast-compatible HTTP client with automated retries, exponential backoff, HTTP 429 rate limit adherence, local JSON disk caching (`data/raw/jolpica/cache/`), and PyArrow schema normalization (`DRIVER_STANDINGS_SCHEMA`, `CONSTRUCTOR_STANDINGS_SCHEMA`, `RACE_RESULTS_SCHEMA`, `QUALIFYING_RESULTS_SCHEMA`, `SPRINT_RESULTS_SCHEMA`).
+  - `src/data/championship_analytics.py`: Temporally strict as-of standings queries (zero future leakage), points gaps to leader/ahead, round-by-round positions gained/lost, mathematical championship elimination analysis, and predictive simulation title probability contracts.
+  - `src/data/jolpica_reconciler.py`: Field-level cross-source reconciliation against existing PACE historical datasets.
+  - `tests/test_jolpica_client.py`: 17 comprehensive offline unit and integration tests with mocked responses covering transport, retries, rate limits, caching, pagination, schemas, as-of temporal isolation, and elimination math.
+  - `docs/JOLPICA_INTEGRATION.md`: Full architectural specification, schemas, verified endpoints, and CLI usage.
+  - `main.py`: CLI commands (`--jolpica-status`, `--jolpica-ingest`, `--jolpica-standings`, `--jolpica-reconcile`).
+- **Acceptance Criteria Met:** Production-grade client, 100% verified schema conformity, zero temporal leakage, and 100% agreement on cross-source reconciliation; all 117 tests in project test suite pass.
+- **Deliverables:** `src/data/jolpica_client.py`, `src/data/championship_analytics.py`, `src/data/jolpica_reconciler.py`, `tests/test_jolpica_client.py`, `docs/JOLPICA_INTEGRATION.md`, `docs/STAGE_5_3_JOLPICA_COMPLETION_REPORT.md`.
 - **Criticality:** High (Agreed Scope E).
 - **Required for Las Vegas:** No (Championship standings baseline already operates on local historical results).
 

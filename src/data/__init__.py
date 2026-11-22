@@ -78,6 +78,27 @@ from src.data.kaggle_importer import (
     DataQualityReport,
     KaggleImportResult,
 )
+from src.data.jolpica_client import (
+    JolpicaClient,
+    JolpicaConfig,
+    JolpicaStats,
+    JolpicaIngestionEngine,
+    JolpicaIngestResult,
+    JolpicaAPIError,
+    JolpicaRateLimitError,
+    JolpicaConnectionError,
+)
+from src.data.championship_analytics import (
+    ChampionshipAnalytics,
+    F1ScoringRules,
+    MathematicalEliminationReport,
+    ChampionshipProgressionEntry,
+)
+from src.data.jolpica_reconciler import (
+    JolpicaReconciler,
+    JolpicaReconciliationReport,
+    JolpicaConflict,
+)
 
 __all__ = [
     "DRIVERS_SCHEMA",
@@ -153,4 +174,19 @@ __all__ = [
     "ReconciliationConflict",
     "DataQualityReport",
     "KaggleImportResult",
+    "JolpicaClient",
+    "JolpicaConfig",
+    "JolpicaStats",
+    "JolpicaIngestionEngine",
+    "JolpicaIngestResult",
+    "JolpicaAPIError",
+    "JolpicaRateLimitError",
+    "JolpicaConnectionError",
+    "ChampionshipAnalytics",
+    "F1ScoringRules",
+    "MathematicalEliminationReport",
+    "ChampionshipProgressionEntry",
+    "JolpicaReconciler",
+    "JolpicaReconciliationReport",
+    "JolpicaConflict",
 ]
