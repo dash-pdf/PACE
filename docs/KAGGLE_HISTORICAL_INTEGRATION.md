@@ -147,20 +147,22 @@ All career starts, win counts, teammate metrics, and track affinities for target
 
 ## 6. Persisted Parquet Data Layer
 
-All 10 historical tables are persisted to `data/historical/`:
+All 12 historical tables and derived intelligence datasets are persisted to `data/historical/`:
 
-| Dataset Path | Schema | Records | Coverage |
-| :--- | :--- | :---: | :---: |
-| `data/historical/historical_race_results.parquet` | `RACE_RESULTS_SCHEMA` | 580 | 1950–2026 |
-| `data/historical/historical_circuits.parquet` | `CIRCUITS_SCHEMA` | 27 | 1950–2026 |
-| `data/historical/historical_constructors.parquet` | `CONSTRUCTORS_SCHEMA` | 17 | 1950–2026 |
-| `data/historical/historical_drivers.parquet` | `DRIVERS_SCHEMA` | 60 | 1950–2026 |
-| `data/historical/historical_events.parquet` | `EVENTS_SCHEMA` | 102 | 1950–2026 |
-| `data/historical/historical_qualifying.parquet` | `QUALIFYING_RESULTS_SCHEMA` | 561 | 1994–2026 |
-| `data/historical/historical_driver_standings.parquet` | `DRIVER_STANDINGS_SCHEMA` | 10 | 1950–2024 |
-| `data/historical/historical_constructor_standings.parquet` | `CONSTRUCTOR_STANDINGS_SCHEMA` | 7 | 1958–2024 |
-| `data/historical/driver_circuit/driver_circuit_appearances.parquet` | `DRIVER_CIRCUIT_APPEARANCES_SCHEMA` | 6,474 | 1950–2026 |
-| `data/historical/driver_circuit/driver_circuit_aggregated.parquet` | `DRIVER_CIRCUIT_AGGREGATED_SCHEMA` | 1,158 | 1950–2026 |
+| Dataset Path | Schema | Records | Coverage | Columns |
+| :--- | :--- | :---: | :---: | :---: |
+| `data/historical/historical_race_results.parquet` | `RACE_RESULTS_SCHEMA` | 27,587 | 1950–2026 | 23 |
+| `data/historical/historical_circuits.parquet` | `CIRCUITS_SCHEMA` | 77 | 1950–2026 | 9 |
+| `data/historical/historical_constructors.parquet` | `CONSTRUCTORS_SCHEMA` | 204 | 1950–2026 | 6 |
+| `data/historical/historical_drivers.parquet` | `DRIVERS_SCHEMA` | 882 | 1950–2026 | 11 |
+| `data/historical/historical_events.parquet` | `EVENTS_SCHEMA` | 1,172 | 1950–2026 | 9 |
+| `data/historical/historical_qualifying.parquet` | `QUALIFYING_RESULTS_SCHEMA` | 11,408 | 1994–2026 | 15 |
+| `data/historical/historical_driver_standings.parquet` | `DRIVER_STANDINGS_SCHEMA` | 35,813 | 1950–2026 | 9 |
+| `data/historical/historical_constructor_standings.parquet` | `CONSTRUCTOR_STANDINGS_SCHEMA` | 13,851 | 1958–2026 | 9 |
+| `data/historical/historical_pit_stops.parquet` | `PIT_STOPS_SCHEMA` | 22,950 | 1994–2026 | 10 |
+| `data/historical/historical_sprints.parquet` | `SPRINT_RESULTS_SCHEMA` | 612 | 2021–2026 | 22 |
+| `data/historical/driver_circuit/driver_circuit_appearances.parquet` | `DRIVER_CIRCUIT_APPEARANCES_SCHEMA` | 27,587 | 1950–2026 | 38 |
+| `data/historical/driver_circuit/driver_circuit_aggregated.parquet` | `DRIVER_CIRCUIT_AGGREGATED_SCHEMA` | 8,356 | 1950–2026 | 27 |
 
 ---
 

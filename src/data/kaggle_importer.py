@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from collections import defaultdict
 import json
 import logging
 import os
@@ -466,10 +467,18 @@ class KaggleImporter:
             url = str(row.get("url", "")).strip()
 
             # Resolve or register
-            res = self.registry.resolve_driver(d_ref, strict=False)
-            if res.is_resolved:
-                canon_id = str(res.canonical_id)
-            else:
+            # Check by exact canonical_id, ergast_id, or exact full_name first to avoid
+            # misattributing historical drivers to relatives with shared surnames (e.g., Jos vs Max Verstappen, Jan vs Kevin Magnussen)
+            canon_id = None
+            for existing_d in self.registry.list_drivers():
+                if existing_d.canonical_id == d_ref or existing_d.ergast_id == d_ref:
+                    canon_id = existing_d.canonical_id
+                    break
+                if existing_d.full_name.strip().lower() == full_name.strip().lower():
+                    canon_id = existing_d.canonical_id
+                    break
+
+            if canon_id is None:
                 canon_id = d_ref
                 new_driver = CanonicalDriver(
                     canonical_id=canon_id,
@@ -786,6 +795,133 @@ class KaggleImporter:
         df = pd.DataFrame(records, columns=CONSTRUCTOR_STANDINGS_SCHEMA.names)
         return df.drop_duplicates(subset=["season", "round", "constructor_id"], keep="first")
 
+    def import_pit_stops(self) -> pd.DataFrame:
+        """Parse pit_stops.csv into PIT_STOPS_SCHEMA DataFrame."""
+        df_raw = self.load_csv("pit_stops.csv")
+        if df_raw.empty:
+            return pd.DataFrame(columns=PIT_STOPS_SCHEMA.names)
+
+        now = datetime.now(timezone.utc).isoformat()
+        records: List[Dict[str, Any]] = []
+
+        for _, row in df_raw.iterrows():
+            r_id = int(row["raceId"])
+            d_raw_id = int(row["driverId"])
+            if r_id not in self._race_id_map or d_raw_id not in self._driver_id_map:
+                continue
+
+            race_info = self._race_id_map[r_id]
+            driver_id = self._driver_id_map[d_raw_id]
+
+            stop_num = int(row["stop"]) if pd.notna(row.get("stop")) else 1
+            lap_num = int(row["lap"]) if pd.notna(row.get("lap")) else 1
+            p_time = str(row.get("time", "")).strip() if pd.notna(row.get("time")) else ""
+            dur_str = str(row.get("duration", "")).strip() if pd.notna(row.get("duration")) else ""
+            ms_val = row.get("milliseconds")
+            dur_ms = float(ms_val) if pd.notna(ms_val) else None
+
+            records.append({
+                "season": race_info["season"],
+                "round": race_info["round"],
+                "driver_id": driver_id,
+                "stop_number": stop_num,
+                "lap_number": lap_num,
+                "pit_time_str": p_time,
+                "duration_str": dur_str,
+                "duration_ms": dur_ms,
+                "source_api": "kaggle.rohanrao",
+                "retrieved_at": now,
+            })
+
+        df = pd.DataFrame(records, columns=PIT_STOPS_SCHEMA.names)
+        return df.drop_duplicates(subset=["season", "round", "driver_id", "stop_number"], keep="first")
+
+    def import_sprints(self) -> pd.DataFrame:
+        """Parse sprint_results.csv into SPRINT_RESULTS_SCHEMA DataFrame."""
+        df_raw = self.load_csv("sprint_results.csv")
+        if df_raw.empty:
+            return pd.DataFrame(columns=SPRINT_RESULTS_SCHEMA.names)
+
+        now = datetime.now(timezone.utc).isoformat()
+        records: List[Dict[str, Any]] = []
+
+        for _, row in df_raw.iterrows():
+            r_id = int(row["raceId"])
+            d_raw_id = int(row["driverId"])
+            c_raw_id = int(row["constructorId"])
+            if r_id not in self._race_id_map or d_raw_id not in self._driver_id_map:
+                continue
+
+            race_info = self._race_id_map[r_id]
+            driver_id = self._driver_id_map[d_raw_id]
+            constructor_id = self._constructor_id_map.get(c_raw_id, "unknown")
+
+            num_val = row.get("number")
+            num = int(num_val) if pd.notna(num_val) else -1
+            grid = int(row["grid"]) if pd.notna(row.get("grid")) else 0
+            pos_val = row.get("position")
+            pos = int(pos_val) if pd.notna(pos_val) else None
+            pos_text = str(row.get("positionText", "")).strip()
+            pts = float(row.get("points", 0.0)) if pd.notna(row.get("points")) else 0.0
+            laps = int(row.get("laps", 0)) if pd.notna(row.get("laps")) else 0
+
+            status_id = int(row.get("statusId", 0)) if pd.notna(row.get("statusId")) else 0
+            status_text = self._status_id_map.get(status_id, "Finished")
+
+            s_lower = status_text.lower()
+            p_upper = pos_text.upper()
+            is_dsq = p_upper == "D" or "disqualif" in s_lower or "dsq" in s_lower
+            is_dns = p_upper == "W" or "did not start" in s_lower or "dns" in s_lower or "withdrew" in s_lower
+            is_classified = (
+                not is_dsq and not is_dns and (
+                    s_lower.startswith("finished")
+                    or "+ lap" in s_lower
+                    or "+ laps" in s_lower
+                    or s_lower.startswith("+")
+                    or "lapped" in s_lower
+                )
+            )
+            is_dnf = not is_classified and not is_dns and not is_dsq
+
+            tot_ms_val = row.get("milliseconds")
+            tot_ms = float(tot_ms_val) if pd.notna(tot_ms_val) else None
+            time_str = str(row.get("time", "")).strip() if pd.notna(row.get("time")) else ""
+
+            fl_num_val = row.get("fastestLap")
+            fl_num = int(fl_num_val) if pd.notna(fl_num_val) else None
+            fl_time = str(row.get("fastestLapTime", "")).strip() if pd.notna(row.get("fastestLapTime")) else ""
+
+            d_entity = self.registry.get_driver(driver_id)
+            d_code = d_entity.code if d_entity else ""
+
+            records.append({
+                "season": race_info["season"],
+                "round": race_info["round"],
+                "driver_id": driver_id,
+                "constructor_id": constructor_id,
+                "driver_number": num,
+                "driver_code": d_code,
+                "grid_position": grid,
+                "finish_position": pos,
+                "position_text": pos_text,
+                "points": pts,
+                "laps_completed": laps,
+                "status": status_text,
+                "is_classified": is_classified,
+                "is_dnf": is_dnf,
+                "is_dns": is_dns,
+                "is_dsq": is_dsq,
+                "total_time_ms": tot_ms,
+                "total_time_str": time_str,
+                "fastest_lap_number": fl_num,
+                "fastest_lap_time": fl_time,
+                "source_api": "kaggle.rohanrao",
+                "retrieved_at": now,
+            })
+
+        df = pd.DataFrame(records, columns=SPRINT_RESULTS_SCHEMA.names)
+        return df.drop_duplicates(subset=["season", "round", "driver_id"], keep="first")
+
 
 # ---------------------------------------------------------------------------
 # Source Reconciliation Layer
@@ -934,28 +1070,35 @@ class HistoricalIntelligenceExpander:
         now = datetime.now(timezone.utc).isoformat()
         appearances: List[Dict[str, Any]] = []
 
-        # Group by race event & constructor to resolve teammates
-        groups = results.groupby(["season", "round", "constructor_id"])
+        # Fast pure-Python grouping by (season, round, constructor_id)
+        from collections import defaultdict
+        records_list = df_results.to_dict(orient="records")
+        team_groups: Dict[Tuple[int, int, str], List[Dict[str, Any]]] = defaultdict(list)
+        for r in records_list:
+            team_groups[(int(r["season"]), int(r["round"]), str(r["constructor_id"]))].append(r)
 
-        for (s, rnd, c_id), team_df in groups:
-            season = int(s)
-            round_num = int(rnd)
-            constructor_id = str(c_id)
+        now = datetime.now(timezone.utc).isoformat()
+        appearances: List[Dict[str, Any]] = []
+
+        for (season, round_num, constructor_id), team_members in team_groups.items():
             constructor_name = c_name_map.get(constructor_id, constructor_id)
-
             r_info = r_map.get((season, round_num), {})
             circuit_id = r_info.get("circuit_id", "unknown")
             event_name = r_info.get("event_name", "")
             event_date = r_info.get("event_date", "")
             era = get_regulation_era(season)
 
-            for _, d_row in team_df.iterrows():
+            for d_row in team_members:
                 driver_id = str(d_row["driver_id"])
-                grid = int(d_row["grid_position"]) if pd.notna(d_row.get("grid_position")) else 0
-                fin = int(d_row["finish_position"]) if pd.notna(d_row.get("finish_position")) else None
+                grid_val = d_row.get("grid_position")
+                grid = int(grid_val) if pd.notna(grid_val) else 0
+                fin_val = d_row.get("finish_position")
+                fin = int(fin_val) if pd.notna(fin_val) else None
                 pos_text = str(d_row.get("position_text", ""))
-                pts = float(d_row.get("points", 0.0)) if pd.notna(d_row.get("points")) else 0.0
-                laps = int(d_row.get("laps_completed", 0)) if pd.notna(d_row.get("laps_completed")) else 0
+                pts_val = d_row.get("points")
+                pts = float(pts_val) if pd.notna(pts_val) else 0.0
+                laps_val = d_row.get("laps_completed")
+                laps = int(laps_val) if pd.notna(laps_val) else 0
                 status = str(d_row.get("status", "Finished"))
 
                 is_class = bool(d_row.get("is_classified", False))
@@ -967,10 +1110,13 @@ class HistoricalIntelligenceExpander:
                 pos_delta = (grid - fin) if (is_class and grid > 0 and fin is not None and fin > 0) else None
 
                 # Fastest lap and race duration
-                tot_time_ms = float(d_row.get("total_time_ms")) if pd.notna(d_row.get("total_time_ms")) else None
-                fl_rank = int(d_row.get("fastest_lap_rank")) if pd.notna(d_row.get("fastest_lap_rank")) else None
+                tot_ms_val = d_row.get("total_time_ms")
+                tot_time_ms = float(tot_ms_val) if pd.notna(tot_ms_val) else None
+                fl_rk_val = d_row.get("fastest_lap_rank")
+                fl_rank = int(fl_rk_val) if pd.notna(fl_rk_val) else None
                 fl_time = str(d_row.get("fastest_lap_time", "")).strip() if pd.notna(d_row.get("fastest_lap_time")) else ""
-                fl_spd = float(d_row.get("fastest_lap_speed")) if pd.notna(d_row.get("fastest_lap_speed")) else None
+                fl_spd_val = d_row.get("fastest_lap_speed")
+                fl_spd = float(fl_spd_val) if pd.notna(fl_spd_val) else None
 
                 # Qualifying data
                 q_info = q_map.get((season, round_num, driver_id), {})
@@ -983,23 +1129,28 @@ class HistoricalIntelligenceExpander:
                 q3_ms = q_info.get("q3_time_ms")
 
                 # Find teammate in same constructor & event
-                tm_rows = team_df[team_df["driver_id"] != driver_id]
+                tm_rows = [x for x in team_members if str(x["driver_id"]) != driver_id]
                 tm_id = None
                 tm_grid = None
                 tm_fin = None
                 beat_tm_race = None
                 beat_tm_qualy = None
 
-                if not tm_rows.empty:
-                    # Sort teammates: classified first, then best finish, then best grid
-                    tm_sorted = tm_rows.sort_values(
-                        by=["is_classified", "finish_position", "grid_position"],
-                        ascending=[False, True, True],
+                if tm_rows:
+                    tm_sorted = sorted(
+                        tm_rows,
+                        key=lambda x: (
+                            not bool(x.get("is_classified", False)),
+                            int(x["finish_position"]) if pd.notna(x.get("finish_position")) else 9999,
+                            int(x["grid_position"]) if pd.notna(x.get("grid_position")) and x.get("grid_position") > 0 else 9999,
+                        ),
                     )
-                    tm_first = tm_sorted.iloc[0]
+                    tm_first = tm_sorted[0]
                     tm_id = str(tm_first["driver_id"])
-                    tm_grid = int(tm_first["grid_position"]) if pd.notna(tm_first.get("grid_position")) and int(tm_first.get("grid_position")) > 0 else None
-                    tm_fin = int(tm_first["finish_position"]) if pd.notna(tm_first.get("finish_position")) else None
+                    tm_gr_val = tm_first.get("grid_position")
+                    tm_grid = int(tm_gr_val) if pd.notna(tm_gr_val) and int(tm_gr_val) > 0 else None
+                    tm_fn_val = tm_first.get("finish_position")
+                    tm_fin = int(tm_fn_val) if pd.notna(tm_fn_val) else None
                     tm_class = bool(tm_first.get("is_classified", False))
 
                     # Head-to-head race evaluation
@@ -1065,7 +1216,8 @@ class HistoricalIntelligenceExpander:
 
         # Merge with existing appearances to preserve rich FastF1/Ergast metrics
         if existing_appearances is not None and not existing_appearances.empty:
-            combined = pd.concat([existing_appearances, df_new], ignore_index=True)
+            clean_existing = existing_appearances[existing_appearances["source_api"] != "kaggle_reconciled"]
+            combined = pd.concat([clean_existing, df_new], ignore_index=True)
             master_app = combined.drop_duplicates(subset=["driver_id", "season", "round"], keep="first")
         else:
             master_app = df_new.drop_duplicates(subset=["driver_id", "season", "round"], keep="first")
@@ -1084,6 +1236,7 @@ class HistoricalIntelligenceExpander:
         """Derive aggregated performance profiles across (driver_id, circuit_id).
         
         Outputs all 27 columns adhering strictly to DRIVER_CIRCUIT_AGGREGATED_SCHEMA.
+        Optimized with dictionary grouping for sub-second execution on large histories.
         """
         if df_appearances.empty:
             return pd.DataFrame(columns=DRIVER_CIRCUIT_AGGREGATED_SCHEMA.names)
@@ -1091,53 +1244,68 @@ class HistoricalIntelligenceExpander:
         now = datetime.now(timezone.utc).isoformat()
         records: List[Dict[str, Any]] = []
 
-        groups = df_appearances.groupby(["driver_id", "circuit_id"])
+        # Fast dictionary grouping across (driver_id, circuit_id)
+        driver_circuit_groups: Dict[Tuple[str, str], List[Dict[str, Any]]] = defaultdict(list)
+        for row in df_appearances.to_dict(orient="records"):
+            driver_circuit_groups[(str(row["driver_id"]), str(row["circuit_id"]))].append(row)
 
-        for (d_id, c_id), g in groups:
-            driver_id = str(d_id)
-            circuit_id = str(c_id)
-            total_starts = len(g)
-            first_s = int(g["season"].min())
-            latest_s = int(g["season"].max())
+        for (driver_id, circuit_id), rows in driver_circuit_groups.items():
+            total_starts = len(rows)
+            seasons = [int(r["season"]) for r in rows if pd.notna(r.get("season"))]
+            first_s = min(seasons) if seasons else 0
+            latest_s = max(seasons) if seasons else 0
 
-            classified_g = g[g["is_classified"] & (g["finish_position"] > 0)]
-            valid_grid_g = g[g["grid_position"] > 0]
+            classified_rows = [
+                r for r in rows
+                if bool(r.get("is_classified", False)) and pd.notna(r.get("finish_position")) and r["finish_position"] > 0
+            ]
+            valid_grid_rows = [
+                r for r in rows
+                if pd.notna(r.get("grid_position")) and r["grid_position"] > 0
+            ]
 
-            wins = int((g["finish_position"] == 1).sum())
-            podiums = int((g["finish_position"].between(1, 3)).sum())
-            poles = int((g["grid_position"] == 1).sum())
-            top_5 = int((g["finish_position"].between(1, 5)).sum())
-            top_10 = int((g["finish_position"].between(1, 10)).sum())
+            wins = sum(1 for r in rows if r.get("finish_position") == 1)
+            podiums = sum(1 for r in rows if pd.notna(r.get("finish_position")) and 1 <= r["finish_position"] <= 3)
+            poles = sum(1 for r in rows if r.get("grid_position") == 1)
+            top_5 = sum(1 for r in rows if pd.notna(r.get("finish_position")) and 1 <= r["finish_position"] <= 5)
+            top_10 = sum(1 for r in rows if pd.notna(r.get("finish_position")) and 1 <= r["finish_position"] <= 10)
 
-            dnfs = int(g["is_dnf"].sum())
+            dnfs = sum(1 for r in rows if bool(r.get("is_dnf", False)))
             dnf_rate = float(dnfs / total_starts) if total_starts > 0 else 0.0
 
-            pts = float(g["points"].sum())
+            pts = sum(float(r.get("points") or 0.0) for r in rows if pd.notna(r.get("points")))
             avg_pts = float(pts / total_starts) if total_starts > 0 else 0.0
 
-            avg_grid = float(valid_grid_g["grid_position"].mean()) if not valid_grid_g.empty else None
-            avg_finish = float(classified_g["finish_position"].mean()) if not classified_g.empty else None
+            grid_positions = [float(r["grid_position"]) for r in valid_grid_rows]
+            avg_grid = float(sum(grid_positions) / len(grid_positions)) if grid_positions else None
 
-            gained_valid = g[g["positions_gained_lost"].notna()]
-            avg_gained = float(gained_valid["positions_gained_lost"].mean()) if not gained_valid.empty else None
+            finish_positions = [float(r["finish_position"]) for r in classified_rows]
+            avg_finish = float(sum(finish_positions) / len(finish_positions)) if finish_positions else None
 
-            best_fin = int(classified_g["finish_position"].min()) if not classified_g.empty else None
-            best_grd = int(valid_grid_g["grid_position"].min()) if not valid_grid_g.empty else None
+            gained_valid = [float(r["positions_gained_lost"]) for r in rows if pd.notna(r.get("positions_gained_lost"))]
+            avg_gained = float(sum(gained_valid) / len(gained_valid)) if gained_valid else None
+
+            best_fin = int(min(finish_positions)) if finish_positions else None
+            best_grd = int(min(grid_positions)) if grid_positions else None
 
             # Teammate head-to-head metrics
-            valid_race_h2h = g[g["beat_teammate_race"].notna()]
-            race_h2h_wins = int((valid_race_h2h["beat_teammate_race"] == True).sum())
-            race_h2h_rate = float(race_h2h_wins / len(valid_race_h2h)) if len(valid_race_h2h) > 0 else None
+            valid_race_h2h = [r for r in rows if r.get("beat_teammate_race") is not None and pd.notna(r.get("beat_teammate_race"))]
+            race_h2h_wins = sum(1 for r in valid_race_h2h if r.get("beat_teammate_race") is True)
+            race_h2h_rate = float(race_h2h_wins / len(valid_race_h2h)) if valid_race_h2h else None
 
-            valid_qualy_h2h = g[g["beat_teammate_qualy"].notna()]
-            qualy_h2h_wins = int((valid_qualy_h2h["beat_teammate_qualy"] == True).sum())
-            qualy_h2h_rate = float(qualy_h2h_wins / len(valid_qualy_h2h)) if len(valid_qualy_h2h) > 0 else None
+            valid_qualy_h2h = [r for r in rows if r.get("beat_teammate_qualy") is not None and pd.notna(r.get("beat_teammate_qualy"))]
+            qualy_h2h_wins = sum(1 for r in valid_qualy_h2h if r.get("beat_teammate_qualy") is True)
+            qualy_h2h_rate = float(qualy_h2h_wins / len(valid_qualy_h2h)) if valid_qualy_h2h else None
 
             # Ground effect era (2022-2026) subset
-            ge_g = g[g["season"] >= 2022]
-            ge_starts = int(len(ge_g))
-            ge_class = ge_g[ge_g["is_classified"] & (ge_g["finish_position"] > 0)]
-            ge_avg_fin = float(ge_class["finish_position"].mean()) if not ge_class.empty else None
+            ge_rows = [r for r in rows if pd.notna(r.get("season")) and r["season"] >= 2022]
+            ge_starts = int(len(ge_rows))
+            ge_class = [
+                r for r in ge_rows
+                if bool(r.get("is_classified", False)) and pd.notna(r.get("finish_position")) and r["finish_position"] > 0
+            ]
+            ge_finishes = [float(r["finish_position"]) for r in ge_class]
+            ge_avg_fin = float(sum(ge_finishes) / len(ge_finishes)) if ge_finishes else None
 
             records.append({
                 "driver_id": driver_id,
@@ -1302,6 +1470,8 @@ def run_kaggle_historical_integration(
 
     df_d_standings = importer.import_driver_standings()
     df_c_standings = importer.import_constructor_standings()
+    df_pit_stops = importer.import_pit_stops()
+    df_sprints = importer.import_sprints()
 
     # 4. Load Existing FastF1 Datasets for Reconciliation
     f1_results_path = get_historical_path("race_results", base_dir=base)
@@ -1391,6 +1561,18 @@ def run_kaggle_historical_integration(
                 get_historical_path("constructor_standings", base_dir=base),
                 schema=CONSTRUCTOR_STANDINGS_SCHEMA,
             )
+        if not df_pit_stops.empty:
+            written["historical_pit_stops"] = save_parquet(
+                df_pit_stops,
+                get_historical_path("pit_stops", base_dir=base),
+                schema=PIT_STOPS_SCHEMA,
+            )
+        if not df_sprints.empty:
+            written["historical_sprints"] = save_parquet(
+                df_sprints,
+                get_historical_path("sprints", base_dir=base),
+                schema=SPRINT_RESULTS_SCHEMA,
+            )
         if not df_appearances.empty:
             written["driver_circuit_appearances"] = save_parquet(
                 df_appearances,
@@ -1412,8 +1594,9 @@ def run_kaggle_historical_integration(
         datasets_written=written,
         summary_message=(
             f"Successfully integrated Kaggle historical dataset: {len(master_results)} master results "
-            f"spanning {min_s}-{max_s} across {quality.distinct_drivers_count} drivers and "
-            f"{quality.distinct_constructors_count} constructors. "
+            f"spanning {min_s}-{max_s} across {quality.distinct_drivers_count} drivers, "
+            f"{quality.distinct_constructors_count} constructors, {len(df_pit_stops)} pit stops, and "
+            f"{len(df_sprints)} sprints. "
             f"{len(df_appearances)} appearances and {len(df_aggregated)} aggregated profiles compiled."
         ),
     )

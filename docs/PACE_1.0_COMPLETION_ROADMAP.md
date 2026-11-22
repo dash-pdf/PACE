@@ -142,7 +142,7 @@ Stages 5.2, 5.3, 5.4, 6.1, 6.2, 7.1-7.3, 8.4 (Full Scope System Hardening & PACE
   - `src/data/schemas.py`: Standardized `DRIVER_STANDINGS_SCHEMA` and `CONSTRUCTOR_STANDINGS_SCHEMA`.
   - `tests/test_kaggle_importer.py`: 9 dedicated unit and integration tests covering API credential discovery, MySQL `\N` null conversion, canonical registration, referential integrity quarantine, source precedence reconciliation, appearances and aggregated compilation, and zero future leakage.
   - `docs/KAGGLE_HISTORICAL_INTEGRATION.md`: Full architectural specification, schemas, reconciliation rules, and reproduction instructions.
-- **Acceptance Criteria Met:** Multi-era historical dataset successfully integrated across 10 Parquet datasets without regressions; all 100 tests in project test suite pass (100 passed in 16.93s).
+- **Acceptance Criteria Met:** Multi-era historical dataset successfully integrated across 12 Parquet datasets (27,587 master results, 22,950 pit stops, 612 sprints, 27,587 appearances, 8,356 aggregated profiles) without regressions; all 100 tests in project test suite pass.
 - **Deliverables:** `src/data/kaggle_importer.py`, `tests/test_kaggle_importer.py`, `docs/KAGGLE_HISTORICAL_INTEGRATION.md`.
 - **Criticality:** High (Agreed Scope B).
 - **Required for Las Vegas:** No.

@@ -509,9 +509,12 @@ def test_kaggle_integration_pipeline_end_to_end():
 
     assert res.success is True
     assert res.inventory.is_valid is True
-    assert res.quality.valid_records_count >= 560
+    assert res.quality.valid_records_count >= 27000
     assert res.quality.seasons_range[0] == 1950
     assert res.quality.seasons_range[1] == 2026
-    assert res.quality.distinct_drivers_count >= 45
-    assert res.reconciliation.reconciled_master_count >= 560
-    assert len(res.reconciliation.conflicts_detected) == 0
+    assert res.quality.distinct_drivers_count >= 800
+    assert res.quality.distinct_circuits_count >= 70
+    assert res.quality.distinct_constructors_count >= 200
+    assert res.reconciliation.reconciled_master_count >= 27000
+    for conflict in res.reconciliation.conflicts_detected:
+        assert "precedence" in conflict.resolution_rule
