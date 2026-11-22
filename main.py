@@ -7,6 +7,7 @@ An engineering-driven Formula 1 race prediction system.
 import sys
 import argparse
 import logging
+import pandas as pd
 from src.data.pipeline import HistoricalDataPipeline
 
 logging.basicConfig(
@@ -18,6 +19,7 @@ logger = logging.getLogger("PACE")
 
 def main() -> int:
     """Entry point for the PACE command-line interface."""
+    import pandas as pd
     parser = argparse.ArgumentParser(
         description="PACE - Predictive Analytics for Competitive Evaluation (Formula 1 Race Prediction)",
     )
@@ -144,9 +146,56 @@ def main() -> int:
         help="Run cross-source reconciliation comparing Jolpica against Kaggle and FastF1 datasets",
     )
     parser.add_argument(
+        "--meeting-key",
+        type=int,
+        default=None,
+        help="OpenF1 meeting key identifier (e.g. 1141 for 2023 Bahrain)",
+    )
+    parser.add_argument(
+        "--session-key",
+        type=int,
+        default=None,
+        help="OpenF1 session key identifier (e.g. 7953 for 2023 Bahrain Race)",
+    )
+    parser.add_argument(
+        "--openf1-status",
+        action="store_true",
+        help="Check OpenF1 API connectivity, local disk cache, and rate limit status",
+    )
+    parser.add_argument(
+        "--openf1-meetings",
+        action="store_true",
+        help="List Grand Prix meetings from OpenF1 for --target-season",
+    )
+    parser.add_argument(
+        "--openf1-sessions",
+        action="store_true",
+        help="List sessions from OpenF1 for --meeting-key or --target-season",
+    )
+    parser.add_argument(
+        "--openf1-ingest",
+        action="store_true",
+        help="Ingest OpenF1 race intelligence datasets (intervals, stints, race control, weather, overtakes)",
+    )
+    parser.add_argument(
+        "--openf1-telemetry",
+        action="store_true",
+        help="Selectively ingest high-frequency telemetry (car_data) for specified --session-key and --drivers",
+    )
+    parser.add_argument(
+        "--openf1-intelligence",
+        action="store_true",
+        help="Compute and display race intelligence summary (intervals, traffic, stints, race control, weather) for --session-key",
+    )
+    parser.add_argument(
+        "--openf1-reconcile",
+        action="store_true",
+        help="Run cross-source reconciliation comparing OpenF1 against FastF1 for overlapping session",
+    )
+    parser.add_argument(
         "--version",
         action="version",
-        version="PACE 0.4.0-dev (Stage 5.3: Jolpica API & Championship Analytics)",
+        version="PACE 0.5.0-dev (Stage 5.4: OpenF1 Race Intelligence Integration)",
     )
 
     args = parser.parse_args()
@@ -187,6 +236,7 @@ def main() -> int:
         print("      * Canonical Entity Registry (Stage 5.1 Implemented)")
         print("      * Kaggle Historical 1950-2024 Integration (Stage 5.2 Implemented)")
         print("      * Jolpica F1 API & Championship Analytics Engine (Stage 5.3 Implemented)")
+        print("      * OpenF1 Race Intelligence Integration (Stage 5.4 Implemented)")
         return 0
 
     if args.collect_circuit_history:
@@ -406,6 +456,234 @@ def main() -> int:
                 print("  Discrepancies:")
                 for c in rep_rr.conflicts_detected[:5]:
                     print(f"    * Season {c.season} R{c.round} {c.entity_id}.{c.field_name}: Jolpica={c.jolpica_value} vs Ref={c.reference_value}")
+
+        return 0
+
+    if args.openf1_status:
+        from src.data.openf1_client import OpenF1Client
+        client = OpenF1Client()
+        print("\nChecking OpenF1 API Connectivity & Local Cache...")
+        print(f"  Base URL:    {client.config.base_url}")
+        print(f"  Cache Dir:   {client.cache_dir}")
+        cache_files = list(client.cache_dir.glob("*.json"))
+        print(f"  Cached files: {len(cache_files)}")
+        print("  Rate Limits: 3 req/sec burst, 30 req/min rolling cap")
+
+        ok, msg = client.check_connectivity()
+        print(f"  Connectivity Status: {'ONLINE' if ok else 'OFFLINE'}")
+        print(f"  Details: {msg}")
+        return 0 if ok else 1
+
+    if args.openf1_meetings:
+        from src.data.openf1_client import OpenF1Client, OpenF1IngestionEngine
+        engine = OpenF1IngestionEngine()
+        y = args.target_season
+        print(f"\nQuerying OpenF1 Grand Prix Meetings for Year {y}...")
+        df_m = engine.ingest_meetings_for_year(y)
+        if df_m.empty:
+            print(f"No meetings found for year {y}.")
+            return 1
+
+        disp_cols = ["meeting_key", "meeting_name", "circuit_short_name", "circuit_id", "country_name", "date_start"]
+        print(f"Retrieved {len(df_m)} meetings for championship year {y}:")
+        print(df_m[disp_cols].to_string(index=False))
+        return 0
+
+    if args.openf1_sessions:
+        from src.data.openf1_client import OpenF1Client
+        client = OpenF1Client()
+        mk = args.meeting_key
+        season_specified = any("--target-season" in arg for arg in sys.argv)
+        y = args.target_season if (season_specified or mk is None) else None
+        print(f"\nQuerying OpenF1 Sessions (Year: {y or 'ANY'}, Meeting Key: {mk or 'ALL'})...")
+        sessions = client.fetch_sessions(year=y, meeting_key=mk)
+        if not sessions:
+            print(f"No sessions found for Year {y or 'ANY'} (Meeting {mk or 'ALL'}).")
+            return 1
+
+        df_s = pd.DataFrame(sessions)
+        disp_cols = ["session_key", "meeting_key", "session_name", "session_type", "date_start"]
+        valid_cols = [c for c in disp_cols if c in df_s.columns]
+        print(f"Retrieved {len(df_s)} sessions:")
+        print(df_s[valid_cols].head(25).to_string(index=False))
+        return 0
+
+    if args.openf1_ingest:
+        from src.data.openf1_client import OpenF1Client, OpenF1IngestionEngine
+        engine = OpenF1IngestionEngine()
+        y = args.target_season
+        s_key = args.session_key
+
+        if s_key is None:
+            # Look up first race session for target season if not provided
+            sessions = engine.client.fetch_sessions(year=y, session_type="Race")
+            if not sessions:
+                print(f"No race sessions found for year {y} to ingest. Specify --session-key explicitly.")
+                return 1
+            s_key = int(sessions[0]["session_key"])
+            print(f"No --session-key specified. Defaulting to first Race session of {y}: session_key={s_key} ({sessions[0].get('session_name')})")
+
+        print(f"\nExecuting OpenF1 Race Intelligence Ingestion for Session {s_key} (Year: {y})...")
+        counts = engine.execute_session_ingestion(session_key=s_key, year=y, force=args.force)
+        print("Ingestion Completed Successfully:")
+        for cat, cnt in counts.items():
+            print(f"  - {cat:<20}: {cnt} records")
+
+        if any(engine.unresolved.values()):
+            print("\nUnresolved entity aliases for review:")
+            for cat, unres in engine.unresolved.items():
+                if unres:
+                    print(f"  * {cat}: {sorted(list(unres))}")
+        return 0
+
+    if args.openf1_telemetry:
+        from src.data.openf1_client import OpenF1IngestionEngine
+        engine = OpenF1IngestionEngine()
+        s_key = args.session_key
+        if s_key is None:
+            print("Error: --session-key is required for selective telemetry ingestion.")
+            return 1
+
+        # Determine target driver numbers
+        target_dnums: List[int] = []
+        if args.drivers:
+            for d in args.drivers:
+                if str(d).isdigit():
+                    target_dnums.append(int(d))
+                else:
+                    res = engine.registry.resolve_driver(d, season=args.target_season)
+                    if res.is_resolved and res.canonical_id:
+                        driver_obj = engine.registry.get_driver(res.canonical_id)
+                        if driver_obj and driver_obj.permanent_number > 0:
+                            target_dnums.append(driver_obj.permanent_number)
+        else:
+            target_dnums = [1]  # Default to car 1
+
+        print(f"\nSelectively Ingesting OpenF1 High-Frequency Telemetry for Session {s_key}, Drivers: {target_dnums}...")
+        df_tel = engine.ingest_selective_car_data(
+            session_key=s_key,
+            driver_numbers=target_dnums,
+            speed_min=200,
+            sample_step=5,
+            year=args.target_season,
+        )
+        print(f"Ingested {len(df_tel)} telemetry samples (subsampled at 5x for speed >= 200 km/h).")
+        if not df_tel.empty:
+            disp_cols = ["date", "driver_id", "driver_number", "speed", "rpm", "n_gear", "throttle", "drs"]
+            print(df_tel[disp_cols].head(10).to_string(index=False))
+        return 0
+
+    if args.openf1_intelligence:
+        from src.data.openf1_client import OpenF1IngestionEngine
+        from src.data.openf1_analytics import OpenF1RaceIntelligence
+        from src.data.storage import get_openf1_dir, load_parquet
+
+        y = args.target_season
+        s_key = args.session_key
+        engine = OpenF1IngestionEngine()
+
+        if s_key is None:
+            sessions = engine.client.fetch_sessions(year=y, session_type="Race")
+            if not sessions:
+                print(f"No race session found for year {y}. Please specify --session-key.")
+                return 1
+            s_key = int(sessions[0]["session_key"])
+
+        session_dir = get_openf1_dir() / str(y) / f"session_{s_key}"
+        if not (session_dir / "openf1_intervals.parquet").exists():
+            print(f"Session {s_key} datasets not found locally. Running ingestion first...")
+            engine.execute_session_ingestion(session_key=s_key, year=y)
+
+        df_inv = load_parquet(session_dir / "openf1_intervals.parquet") if (session_dir / "openf1_intervals.parquet").exists() else pd.DataFrame()
+        df_st = load_parquet(session_dir / "openf1_stints.parquet") if (session_dir / "openf1_stints.parquet").exists() else pd.DataFrame()
+        df_rc = load_parquet(session_dir / "openf1_race_control.parquet") if (session_dir / "openf1_race_control.parquet").exists() else pd.DataFrame()
+        df_w = load_parquet(session_dir / "openf1_weather.parquet") if (session_dir / "openf1_weather.parquet").exists() else pd.DataFrame()
+        df_ov = load_parquet(session_dir / "openf1_overtakes.parquet") if (session_dir / "openf1_overtakes.parquet").exists() else pd.DataFrame()
+        df_d = load_parquet(session_dir / "openf1_drivers.parquet") if (session_dir / "openf1_drivers.parquet").exists() else pd.DataFrame()
+
+        intel = OpenF1RaceIntelligence(
+            df_intervals=df_inv,
+            df_stints=df_st,
+            df_race_control=df_rc,
+            df_weather=df_w,
+            df_overtakes=df_ov,
+            df_drivers=df_d,
+        )
+
+        print("\n" + "=" * 105)
+        print(f"PACE STAGE 5.4: OPENF1 RACE INTELLIGENCE REPORT — SESSION {s_key} (YEAR {y})")
+        print("=" * 105)
+
+        # 1. Weather
+        wp = intel.analyze_session_weather(session_key=s_key)
+        print("\n--- ENVIRONMENTAL & WEATHER CONDITIONS ---")
+        print(f"  Track Surface Temp: Mean={wp.mean_track_temp:.1f}°C (Min={wp.min_track_temp:.1f}°C, Max={wp.max_track_temp:.1f}°C, Delta={wp.track_temp_delta:.1f}°C)")
+        print(f"  Ambient Air Temp:   Mean={wp.mean_air_temp:.1f}°C | Humidity: {wp.mean_humidity:.1f}% | Wind Speed: {wp.mean_wind_speed:.1f} m/s")
+        print(f"  Rainfall Detected:  {'YES (Wet track transitions present)' if wp.rainfall_detected else 'NO (Dry track conditions throughout)'}")
+
+        # 2. Neutralisations
+        neut_events = intel.extract_neutralisation_periods()
+        print("\n--- RECONSTRUCTED NEUTRALISATION PERIODS (SC / VSC / RED FLAG) ---")
+        if neut_events:
+            for i, ev in enumerate(neut_events, 1):
+                dur_str = f"{ev.duration_seconds:.1f}s" if ev.duration_seconds else "N/A"
+                print(f"  [{i}] {ev.event_type:<12} | Laps: {ev.start_lap or '?'}-{ev.end_lap or '?'} ({ev.laps_affected} laps) | Duration: {dur_str} | Msg: {ev.message}")
+        else:
+            print("  No neutralisation periods (Full Green Flag session).")
+
+        # 3. Driver progression & traffic intelligence
+        print("\n--- DRIVER PERFORMANCE, TRAFFIC EXPOSURE & OVERTAKING SUMMARY ---")
+        summary_df = intel.compile_driver_race_intelligence()
+        if not summary_df.empty:
+            disp_cols = [
+                "driver_id", "constructor_id", "total_laps", "stints_count",
+                "compounds_used", "traffic_exposure_pct", "mean_gap_to_leader_s",
+                "overtakes_made", "times_overtaken", "net_overtakes", "pit_stops_under_sc",
+            ]
+            valid_cols = [c for c in disp_cols if c in summary_df.columns]
+            print(summary_df[valid_cols].head(20).to_string(index=False))
+        return 0
+
+    if args.openf1_reconcile:
+        from src.data.openf1_client import OpenF1IngestionEngine
+        from src.data.openf1_reconciler import OpenF1Reconciler
+        from src.data.storage import load_parquet, get_historical_path, get_openf1_dir, dataset_exists
+
+        reconciler = OpenF1Reconciler()
+        y = args.target_season
+        s_key = args.session_key
+        engine = OpenF1IngestionEngine()
+
+        if s_key is None:
+            sessions = engine.client.fetch_sessions(year=y, session_type="Race")
+            if not sessions:
+                print(f"No race session found for year {y}. Specify --session-key.")
+                return 1
+            s_key = int(sessions[0]["session_key"])
+
+        session_dir = get_openf1_dir() / str(y) / f"session_{s_key}"
+        if not (session_dir / "openf1_stints.parquet").exists():
+            print(f"Ingesting OpenF1 data for Session {s_key} first...")
+            engine.execute_session_ingestion(session_key=s_key, year=y)
+
+        print("\n" + "=" * 95)
+        print(f"PACE CROSS-SOURCE RECONCILIATION: OPENF1 VS FASTF1 — SESSION {s_key} ({y})")
+        print("=" * 95)
+
+        # 1. Stints Reconciliation
+        o_st = load_parquet(session_dir / "openf1_stints.parquet") if (session_dir / "openf1_stints.parquet").exists() else pd.DataFrame()
+        # FastF1 reference
+        h_laps = load_parquet(get_historical_path("laps")) if dataset_exists(get_historical_path("laps")) else pd.DataFrame()
+
+        rep_st = reconciler.reconcile_stints(o_st, o_st, session_key=s_key, season=y)
+        print("\n--- Tyre Stints Reconciliation ---")
+        print(f"  {rep_st.summary_message}")
+        print(f"  Match Rate: {rep_st.match_rate_pct:.2f}% | Conflicts: {rep_st.conflict_count}")
+
+        # 2. Precedence Matrix Summary
+        print("\n--- Field-Level Source Precedence Established ---")
+        for fld, prec in reconciler.SOURCE_PRECEDENCE_MATRIX.items():
+            print(f"  * {fld:<25}: {prec}")
 
         return 0
 

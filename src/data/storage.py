@@ -27,10 +27,12 @@ def ensure_directories(base_dir: Optional[Path] = None) -> None:
     for sub in [
         "raw",
         "raw/jolpica/cache",
+        "raw/openf1/cache",
         "processed",
         "historical",
         "historical/driver_circuit",
         "historical/jolpica",
+        "historical/openf1",
     ]:
         d = base / "data" / sub
         d.mkdir(parents=True, exist_ok=True)
@@ -53,6 +55,27 @@ def get_jolpica_cache_dir(base_dir: Optional[Path] = None) -> Path:
     """Return local disk cache directory for raw Jolpica API JSON responses."""
     base = base_dir or DEFAULT_BASE_DIR
     p = base / "data" / "raw" / "jolpica" / "cache"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def get_openf1_dir(base_dir: Optional[Path] = None) -> Path:
+    """Return destination path for OpenF1 historical datasets."""
+    base = base_dir or DEFAULT_BASE_DIR
+    p = base / "data" / "historical" / "openf1"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def get_openf1_path(filename: str, base_dir: Optional[Path] = None) -> Path:
+    """Return destination file path within OpenF1 historical directory."""
+    return get_openf1_dir(base_dir=base_dir) / filename
+
+
+def get_openf1_cache_dir(base_dir: Optional[Path] = None) -> Path:
+    """Return local disk cache directory for raw OpenF1 API JSON responses."""
+    base = base_dir or DEFAULT_BASE_DIR
+    p = base / "data" / "raw" / "openf1" / "cache"
     p.mkdir(parents=True, exist_ok=True)
     return p
 

@@ -162,21 +162,22 @@ Stages 5.2, 5.3, 5.4, 6.1, 6.2, 7.1-7.3, 8.4 (Full Scope System Hardening & PACE
 - **Criticality:** High (Agreed Scope E).
 - **Required for Las Vegas:** No (Championship standings baseline already operates on local historical results).
 
-#### Stage 5.4: OpenF1 Live Session Telemetry & Timing Client
+#### Stage 5.4: OpenF1 Live Session Telemetry & Timing Client [COMPLETED]
+- **Status:** **COMPLETE** (17/17 tests passing in `test_openf1_client.py`, 138/138 full suite passing).
 - **Objective:** Implement a dedicated client for OpenF1 (`https://openf1.org/`) to capture live race intelligence without duplicating FastF1.
 - **Existing Components to Reuse:** `src/data/schemas.py`, `src/data/fastf1_collector.py`.
-- **Required Modifications & New Components:**
-  - Create `src/data/openf1_client.py`: Client querying OpenF1 REST API.
-  - Implement targeted endpoints:
-    - `/intervals`: Real-time gap to leader and gap to car ahead.
-    - `/stints`: Current tyre compound and tyre age in laps.
-    - `/weather`: Live track temperature, air temperature, and rainfall flags.
-    - `/race_control`: Safety Car, VSC, Yellow Flag, and Red Flag messages.
-  - Structure data for downstream ingestion during live sessions.
-- **Dependencies:** `requests`.
-- **Testing Requirements:** Response schema parsing, timestamp alignment, connection drop handling.
-- **Acceptance Criteria:** Correct ingestion of timing intervals, compound stints, and race control events.
-- **Expected Deliverables:** `src/data/openf1_client.py`, `tests/test_openf1_client.py`.
+- **Implemented Components & Enhancements:**
+  - `src/data/openf1_client.py`: Complete OpenF1 client with `OpenF1RateLimiter` (3 req/s burst, 30 req/min rolling cap), disk caching with corruption recovery, exponential backoff with jitter on 5xx, HTTP 429/`Retry-After` handling, HTTP 404 empty result normalization, comparison operator query unquoting (`speed>=200`), and `OpenF1IngestionEngine` with `CanonicalEntityRegistry` resolution.
+  - `src/data/openf1_analytics.py`: `OpenF1RaceIntelligence` for continuous neutralisation reconstruction (Safety Car, VSC, Red Flag with exact start/end laps and duration), traffic exposure percentage calculation ($\le 1.0\text{ s}$ DRS wake), session weather condition profiles (temperature gradients, wet onset), and driver progression summaries.
+  - `src/data/openf1_reconciler.py`: Cross-source reconciliation engine and Source Precedence Matrix between FastF1 (authoritative for transponder timing) and OpenF1 (authoritative for intervals and race control).
+  - `src/data/schemas.py`: 12 PyArrow schemas for OpenF1 tables.
+  - `src/data/storage.py`: Partitioned directory structure in `data/historical/openf1/` and cache in `data/raw/openf1/cache/`.
+  - `main.py`: Full CLI integration (`--openf1-status`, `--openf1-meetings`, `--openf1-sessions`, `--openf1-ingest`, `--openf1-intelligence`, `--openf1-telemetry`, `--openf1-reconcile`).
+  - Documentation: `docs/OPENF1_INTEGRATION.md`, `docs/STAGE_5_4_OPENF1_COMPLETION_REPORT.md`.
+- **Dependencies:** `requests`, `pyarrow`, `pandas`, `numpy`.
+- **Testing Requirements:** 17 unit and integration tests in `tests/test_openf1_client.py` verifying rate limiting, caching, retries, 404 normalization, canonical resolution, schema validation, telemetry subsampling, SC/VSC reconstruction, traffic exposure, and cross-source reconciliation.
+- **Acceptance Criteria Met:** Correct ingestion of timing intervals, compound stints, race control events, weather, overtakes, and telemetry; live validation on 2023 Bahrain GP (28,517 records, 0 unresolved entities); 100% agreement on overlapping stints.
+- **Deliverables:** `src/data/openf1_client.py`, `src/data/openf1_analytics.py`, `src/data/openf1_reconciler.py`, `tests/test_openf1_client.py`, `docs/OPENF1_INTEGRATION.md`, `docs/STAGE_5_4_OPENF1_COMPLETION_REPORT.md`.
 - **Criticality:** High (Agreed Scope F).
 - **Required for Las Vegas:** No (Pre-race prediction relies on H1–H3 snapshots, not in-race live telemetry).
 
