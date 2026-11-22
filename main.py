@@ -155,7 +155,7 @@ def main() -> int:
     print("PACE: Predictive Analytics for Competitive Evaluation")
     print("Formula 1 Race Finishing Position Prediction System")
     print("=" * 70)
-    print("Current Phase: Phase 3 (Driver & Constructor Performance Modelling)")
+    print("Current Phase: PACE 1.0 (Phase 5: Multi-Source Intelligence & Data Infrastructure)")
     print("=" * 70)
 
     if args.status:
@@ -179,8 +179,14 @@ def main() -> int:
         print("      * Chronological Walk-Forward Backtester across 2023-2026")
         print("      * Paired Wilcoxon Signed-Rank Significance Testing")
         print("      * Additive Local Prediction Attribution Explainer")
-        print("  - Race Simulation:          [src/simulation] (Pending Phase 4)")
-        print("  - Reporting & Export:       [src/reporting] (Pending Phase 5)")
+        print("  - Race Simulation:          [src/simulation] (Phase 4 Implemented)")
+        print("      * Micro-sector gap tracking, tyre degradation & pit strategy")
+        print("      * Safety Car, VSC, red flags, mechanical reliability & weather")
+        print("      * Full grid Monte Carlo probabilistic finishing position engine")
+        print("  - Multi-Source Intelligence:[src/data] (Phase 5 Active)")
+        print("      * Canonical Entity Registry (Stage 5.1 Implemented)")
+        print("      * Kaggle Historical 1950-2024 Integration (Stage 5.2 Implemented)")
+        print("      * Jolpica F1 API & Championship Analytics Engine (Stage 5.3 Implemented)")
         return 0
 
     if args.collect_circuit_history:
@@ -293,8 +299,9 @@ def main() -> int:
             print(c_stand[c_valid].to_string(index=False))
 
         elim = analytics.compute_elimination_status(s, r)
-        print("\n--- MATHEMATICAL TITLE ELIMINATION ANALYSIS ---")
+        print("\n--- MATHEMATICAL TITLE ELIMINATION ANALYSIS (DRIVERS) ---")
         print(f"  Remaining Grand Prix Rounds: {elim.remaining_rounds} / {elim.total_rounds}")
+        print(f"  Remaining Sprint Events:     {elim.remaining_sprints}")
         print(f"  Maximum Points Available:    {elim.max_remaining_points:.1f} pts")
         print(f"  Current Championship Leader:  {elim.leader_id} ({elim.leader_points:.1f} pts)")
         print(f"  Active Title Contenders:     {elim.active_contenders_count} drivers ({', '.join(elim.active_contenders[:5])}{'...' if len(elim.active_contenders) > 5 else ''})")
@@ -302,30 +309,103 @@ def main() -> int:
         if elim.eliminated_this_round:
             print(f"  * Drivers Eliminated at Round {r}: {', '.join(elim.eliminated_this_round)}")
 
+        if not c_stand.empty:
+            c_elim = analytics.compute_constructor_elimination_status(s, r)
+            print("\n--- MATHEMATICAL TITLE ELIMINATION ANALYSIS (CONSTRUCTORS) ---")
+            print(f"  Maximum Constructor Points Available: {c_elim.max_remaining_points:.1f} pts")
+            print(f"  Current Championship Leader:          {c_elim.leader_id} ({c_elim.leader_points:.1f} pts)")
+            print(f"  Active Title Contenders:             {c_elim.active_contenders_count} constructors ({', '.join(c_elim.active_contenders)})")
+            print(f"  Mathematically Eliminated:           {c_elim.eliminated_count} constructors")
+            if c_elim.eliminated_this_round:
+                print(f"  * Constructors Eliminated at Round {r}: {', '.join(c_elim.eliminated_this_round)}")
+
         return 0
 
     if args.jolpica_reconcile:
+        import pandas as pd
         from src.data.jolpica_reconciler import JolpicaReconciler
-        from src.data.storage import load_parquet, get_historical_path, dataset_exists
+        from src.data.storage import load_parquet, get_historical_path, get_jolpica_path, dataset_exists
         reconciler = JolpicaReconciler()
-        target_seasons = args.seasons if args.seasons else [args.target_season]
+        target_seasons = args.seasons if any("--seasons" in a for a in sys.argv) else [args.target_season]
         print(f"\nExecuting Cross-Source Reconciliation across seasons {target_seasons}...")
 
-        j_d_path = get_historical_path("driver_standings")
-        if dataset_exists(j_d_path):
-            df_d = load_parquet(j_d_path)
-            rep_d = reconciler.reconcile_driver_standings(df_d, df_d, target_seasons=target_seasons)
+        # 1. Driver Standings Reconciliation: Jolpica season datasets vs Historical Master
+        h_d_path = get_historical_path("driver_standings")
+        j_d_dfs = []
+        for s in target_seasons:
+            jp = get_jolpica_path(f"jolpica_driver_standings_{s}.parquet")
+            if dataset_exists(jp):
+                j_d_dfs.append(load_parquet(jp))
+
+        if j_d_dfs and dataset_exists(h_d_path):
+            df_j_d = pd.concat(j_d_dfs, ignore_index=True)
+            df_ref_d = load_parquet(h_d_path)
+            rep_d = reconciler.reconcile_driver_standings(
+                df_jolpica=df_j_d,
+                df_reference=df_ref_d,
+                target_seasons=target_seasons,
+                reference_source_name="historical_archive",
+            )
             print("\n--- Driver Standings Reconciliation ---")
             print(f"  {rep_d.summary_message}")
             print(f"  Match Rate: {rep_d.match_rate_pct:.2f}% | Conflicts: {rep_d.conflict_count}")
+            if rep_d.conflicts_detected:
+                print("  Discrepancies:")
+                for c in rep_d.conflicts_detected[:5]:
+                    print(f"    * Season {c.season} R{c.round} {c.entity_id}.{c.field_name}: Jolpica={c.jolpica_value} vs Ref={c.reference_value}")
+        else:
+            print("\n--- Driver Standings Reconciliation ---")
+            print("  Skipped: Required Jolpica or historical driver standings files missing. Run --jolpica-ingest first.")
 
-        rr_path = get_historical_path("race_results")
-        if dataset_exists(rr_path):
-            df_rr = load_parquet(rr_path)
-            rep_rr = reconciler.reconcile_race_results(df_rr, df_rr, target_seasons=target_seasons)
+        # 2. Constructor Standings Reconciliation
+        h_c_path = get_historical_path("constructor_standings")
+        j_c_dfs = []
+        for s in target_seasons:
+            jp = get_jolpica_path(f"jolpica_constructor_standings_{s}.parquet")
+            if dataset_exists(jp):
+                j_c_dfs.append(load_parquet(jp))
+
+        if j_c_dfs and dataset_exists(h_c_path):
+            df_j_c = pd.concat(j_c_dfs, ignore_index=True)
+            df_ref_c = load_parquet(h_c_path)
+            rep_c = reconciler.reconcile_constructor_standings(
+                df_jolpica=df_j_c,
+                df_reference=df_ref_c,
+                target_seasons=target_seasons,
+                reference_source_name="historical_archive",
+            )
+            print("\n--- Constructor Standings Reconciliation ---")
+            print(f"  {rep_c.summary_message}")
+            print(f"  Match Rate: {rep_c.match_rate_pct:.2f}% | Conflicts: {rep_c.conflict_count}")
+            if rep_c.conflicts_detected:
+                print("  Discrepancies:")
+                for c in rep_c.conflicts_detected[:5]:
+                    print(f"    * Season {c.season} R{c.round} {c.entity_id}.{c.field_name}: Jolpica={c.jolpica_value} vs Ref={c.reference_value}")
+
+        # 3. Race Results Reconciliation
+        h_rr_path = get_historical_path("race_results")
+        j_rr_dfs = []
+        for s in target_seasons:
+            jp = get_jolpica_path(f"jolpica_race_results_{s}.parquet")
+            if dataset_exists(jp):
+                j_rr_dfs.append(load_parquet(jp))
+
+        if j_rr_dfs and dataset_exists(h_rr_path):
+            df_j_rr = pd.concat(j_rr_dfs, ignore_index=True)
+            df_ref_rr = load_parquet(h_rr_path)
+            rep_rr = reconciler.reconcile_race_results(
+                df_jolpica=df_j_rr,
+                df_reference=df_ref_rr,
+                target_seasons=target_seasons,
+                reference_source_name="fastf1_or_kaggle",
+            )
             print("\n--- Race Results Reconciliation ---")
             print(f"  {rep_rr.summary_message}")
             print(f"  Match Rate: {rep_rr.match_rate_pct:.2f}% | Conflicts: {rep_rr.conflict_count}")
+            if rep_rr.conflicts_detected:
+                print("  Discrepancies:")
+                for c in rep_rr.conflicts_detected[:5]:
+                    print(f"    * Season {c.season} R{c.round} {c.entity_id}.{c.field_name}: Jolpica={c.jolpica_value} vs Ref={c.reference_value}")
 
         return 0
 

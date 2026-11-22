@@ -56,9 +56,10 @@ class MathematicalEliminationReport:
     active_contenders_count: int
     eliminated_count: int
     active_contenders: List[str]
-    eliminated_drivers: List[str]
+    eliminated_drivers: List[str]  # Driver or constructor IDs eliminated
     eliminated_this_round: List[str]
     standings_summary: pd.DataFrame
+    entity_type: str = "driver"
 
 
 # ---------------------------------------------------------------------------
@@ -66,60 +67,119 @@ class MathematicalEliminationReport:
 # ---------------------------------------------------------------------------
 
 class F1ScoringRules:
-    """Historical and modern Formula 1 scoring systems."""
+    """Historical and modern Formula 1 scoring systems across all regulatory eras."""
+
+    # Official known Sprint weekends by season
+    KNOWN_SPRINT_ROUNDS: Dict[int, List[int]] = {
+        2021: [10, 14, 19],                            # Silverstone, Monza, Interlagos
+        2022: [4, 11, 21],                             # Imola, Red Bull Ring, Interlagos
+        2023: [4, 9, 12, 17, 18, 20],                  # Baku, Red Bull Ring, Spa, Lusail, Austin, Interlagos
+        2024: [5, 6, 11, 19, 21, 23],                  # Shanghai, Miami, Red Bull Ring, Austin, Interlagos, Lusail
+        2025: [2, 6, 13, 19, 21, 23],                  # Shanghai, Miami, Spa, Austin, Interlagos, Lusail
+        2026: [2, 4, 5, 9, 12, 17],                    # Provisional calendar sprint rounds
+    }
+
+    @classmethod
+    def get_known_sprint_rounds(cls, season: int) -> List[int]:
+        """Return list of round numbers containing Sprint events for season."""
+        return cls.KNOWN_SPRINT_ROUNDS.get(season, [])
 
     @staticmethod
-    def get_max_points_per_event(season: int, has_sprint: bool = False) -> float:
-        """Calculate maximum points a single driver can score in a Grand Prix weekend."""
-        # 1. Race win points
+    def get_gp_points_distribution(season: int) -> List[float]:
+        """Return Grand Prix finishing points by position (index 0 = 1st place)."""
         if season >= 2010:
-            win_pts = 25.0
+            # 2010-present standard Grand Prix scoring system
+            return [25.0, 18.0, 15.0, 12.0, 10.0, 8.0, 6.0, 4.0, 2.0, 1.0]
         elif season >= 2003:
-            win_pts = 10.0
+            # 2003-2009 Top 8 points system
+            return [10.0, 8.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0]
         elif season >= 1991:
-            win_pts = 10.0
+            # 1991-2002 Top 6 (10 pts for win)
+            return [10.0, 6.0, 4.0, 3.0, 2.0, 1.0]
         elif season >= 1961:
-            win_pts = 9.0
+            # 1961-1990 Top 6 (9 pts for win)
+            return [9.0, 6.0, 4.0, 3.0, 2.0, 1.0]
+        elif season == 1960:
+            # 1960 Top 6 (8 pts for win, 6th place introduced)
+            return [8.0, 6.0, 4.0, 3.0, 2.0, 1.0]
         else:
-            win_pts = 8.0
+            # 1950-1959 Top 5 points system
+            return [8.0, 6.0, 4.0, 3.0, 2.0]
 
-        # 2. Fastest lap points
-        # Modern bonus point was awarded 2019-2024. FIA abolished it for 2025-2026.
-        # Historically awarded 1950-1959 (1 pt).
-        if 2019 <= season <= 2024 or 1950 <= season <= 1959:
-            fl_pts = 1.0
+    @staticmethod
+    def get_sprint_points_distribution(season: int) -> List[float]:
+        """Return Sprint race points by position (index 0 = 1st place)."""
+        if season >= 2022:
+            # 2022-present Top 8 sprint format
+            return [8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0]
+        elif season == 2021:
+            # 2021 Inaugural Sprint Qualifying Top 3
+            return [3.0, 2.0, 1.0]
         else:
-            fl_pts = 0.0
+            return []
 
-        # 3. Sprint race points (Introduced 2021)
+    @staticmethod
+    def has_fastest_lap_point(season: int) -> bool:
+        """Check whether championship regulations award a bonus point for fastest lap.
+        
+        Regulations:
+        - 1950-1959: 1 bonus point awarded (can be shared).
+        - 1960-2018: No fastest lap bonus point.
+        - 2019-2024: 1 bonus point awarded (requires top-10 classified finish).
+        - 2025+: FIA officially abolished the fastest lap bonus point beginning 2025.
+        """
+        if 2019 <= season <= 2024:
+            return True
+        if 1950 <= season <= 1959:
+            return True
+        return False
+
+    @staticmethod
+    def fastest_lap_requires_top_10(season: int) -> bool:
+        """Check if fastest lap bonus point requires a top-10 finish."""
+        return 2019 <= season <= 2024
+
+    @classmethod
+    def get_max_points_per_event(cls, season: int, has_sprint: bool = False) -> float:
+        """Calculate maximum points a single driver can score in a Grand Prix weekend."""
+        gp_dist = cls.get_gp_points_distribution(season)
+        win_pts = gp_dist[0] if gp_dist else 25.0
+        fl_pts = 1.0 if cls.has_fastest_lap_point(season) else 0.0
+
         sprint_pts = 0.0
         if has_sprint:
-            if season >= 2022:
-                sprint_pts = 8.0  # 1st: 8 pts
-            elif season == 2021:
-                sprint_pts = 3.0  # 1st: 3 pts
+            sp_dist = cls.get_sprint_points_distribution(season)
+            sprint_pts = sp_dist[0] if sp_dist else 0.0
 
         return win_pts + fl_pts + sprint_pts
 
-    @staticmethod
-    def get_max_constructor_points_per_event(season: int, has_sprint: bool = False) -> float:
-        """Calculate maximum points a single constructor can score (1-2 finish)."""
-        if season >= 2010:
-            race_pts = 25.0 + 18.0  # 1st and 2nd
-        elif season >= 2003:
-            race_pts = 10.0 + 8.0
-        elif season >= 1991:
-            race_pts = 10.0 + 6.0
-        else:
-            race_pts = 9.0 + 6.0
+    @classmethod
+    def get_max_constructor_points_per_event(cls, season: int, has_sprint: bool = False) -> float:
+        """Calculate maximum points a single constructor can score (1-2 finish + FL)."""
+        if season < 1958:
+            # World Constructors' Championship commenced in 1958
+            return 0.0
 
-        fl_pts = 1.0 if (2019 <= season <= 2024 or 1950 <= season <= 1959) else 0.0
+        gp_dist = cls.get_gp_points_distribution(season)
+
+        if 1958 <= season <= 1978:
+            # 1958-1978: Only the highest-finishing car of a constructor scored points
+            race_pts = gp_dist[0]
+            fl_pts = 0.0  # Constructors never scored fastest lap points in this era
+        else:
+            # 1979+: Up to two cars per constructor score points
+            p1 = gp_dist[0] if len(gp_dist) > 0 else 25.0
+            p2 = gp_dist[1] if len(gp_dist) > 1 else 18.0
+            race_pts = p1 + p2
+            fl_pts = 1.0 if cls.has_fastest_lap_point(season) else 0.0
+
         sprint_pts = 0.0
         if has_sprint:
-            if season >= 2022:
-                sprint_pts = 8.0 + 7.0  # 1st: 8, 2nd: 7
-            elif season == 2021:
-                sprint_pts = 3.0 + 2.0
+            sp_dist = cls.get_sprint_points_distribution(season)
+            if len(sp_dist) >= 2:
+                sprint_pts = sp_dist[0] + sp_dist[1]
+            elif len(sp_dist) == 1:
+                sprint_pts = sp_dist[0]
 
         return race_pts + fl_pts + sprint_pts
 
@@ -397,6 +457,25 @@ class ChampionshipAnalytics:
         return pd.DataFrame()
 
     # -----------------------------------------------------------------------
+    # Sprint Rounds & Calendar Inspection
+    # -----------------------------------------------------------------------
+
+    def get_sprint_rounds_for_season(self, season: int) -> List[int]:
+        """Return round numbers containing Sprint events for season from dataset or known calendar."""
+        if not self.df_sprints.empty and "season" in self.df_sprints.columns:
+            sub = self.df_sprints[self.df_sprints["season"] == season]
+            if not sub.empty and "round" in sub.columns:
+                return sorted([int(r) for r in sub["round"].unique()])
+
+        # Fallback to regulatory known schedule
+        return F1ScoringRules.get_known_sprint_rounds(season)
+
+    def get_remaining_sprints(self, season: int, as_of_round: int, total_rounds: int) -> int:
+        """Count number of Sprint weekends remaining after target round."""
+        sprint_rounds = self.get_sprint_rounds_for_season(season)
+        return sum(1 for r in sprint_rounds if as_of_round < r <= total_rounds)
+
+    # -----------------------------------------------------------------------
     # Mathematical Championship Elimination Engine
     # -----------------------------------------------------------------------
 
@@ -405,12 +484,11 @@ class ChampionshipAnalytics:
         season: int,
         as_of_round: int,
         total_rounds: Optional[int] = None,
-        remaining_sprints: int = 0,
+        remaining_sprints: Optional[int] = None,
     ) -> MathematicalEliminationReport:
         """Calculate mathematical eligibility and elimination for World Drivers' Championship."""
         # 1. Determine total season rounds
         if total_rounds is None:
-            # Query maximum round in current season dataset
             season_rounds = self.df_d_stand[self.df_d_stand["season"] == season]["round"].max()
             if pd.notna(season_rounds) and season_rounds > 0:
                 total_rounds = int(max(season_rounds, 24 if season >= 2024 else 22))
@@ -419,13 +497,16 @@ class ChampionshipAnalytics:
 
         remaining_rounds = max(0, total_rounds - as_of_round)
 
-        # 2. Maximum available points remaining
-        # Formula: N_rem * (25 + FL_pts) + N_sprints_rem * 8
-        fl_pts = 1.0 if (2019 <= season <= 2024 or 1950 <= season <= 1959) else 0.0
-        max_pts_per_race = 25.0 + fl_pts
-        max_remaining_points = (remaining_rounds * max_pts_per_race) + (remaining_sprints * 8.0)
+        # 2. Determine remaining sprint count dynamically from calendar if not explicitly provided
+        if remaining_sprints is None:
+            remaining_sprints = self.get_remaining_sprints(season, as_of_round, total_rounds)
 
-        # 3. Current Standings as of target round
+        # 3. Maximum available points remaining using era-specific rules
+        max_pts_per_race = F1ScoringRules.get_max_points_per_event(season, has_sprint=False)
+        max_sprint_pts = F1ScoringRules.get_max_points_per_event(season, has_sprint=True) - max_pts_per_race
+        max_remaining_points = (remaining_rounds * max_pts_per_race) + (remaining_sprints * max_sprint_pts)
+
+        # 4. Current Standings as of target round
         cur_standings = self.get_driver_standings_as_of(season, as_of_round)
         if cur_standings.empty:
             raise ValueError(f"No driver standings available for season {season} as of round {as_of_round}")
@@ -434,7 +515,7 @@ class ChampionshipAnalytics:
         leader_id = str(leader_row["driver_id"])
         leader_pts = float(leader_row["points"])
 
-        # 4. Prior round standings for elimination delta tracking
+        # 5. Prior round standings for elimination delta tracking
         prev_eliminated_set: Set[str] = set()
         if as_of_round > 1:
             try:
@@ -442,15 +523,15 @@ class ChampionshipAnalytics:
                 if not prev_stand.empty:
                     prev_leader_pts = float(prev_stand.iloc[0]["points"])
                     prev_rem_r = remaining_rounds + 1
-                    # Approximate prev remaining points
-                    prev_rem_pts = (prev_rem_r * max_pts_per_race) + (remaining_sprints * 8.0)
+                    prev_rem_sprints = self.get_remaining_sprints(season, as_of_round - 1, total_rounds)
+                    prev_rem_pts = (prev_rem_r * max_pts_per_race) + (prev_rem_sprints * max_sprint_pts)
                     for _, pr in prev_stand.iterrows():
                         if float(pr["points"]) + prev_rem_pts < prev_leader_pts:
                             prev_eliminated_set.add(str(pr["driver_id"]))
             except Exception:
                 pass
 
-        # 5. Evaluate contention for each driver
+        # 6. Evaluate contention for each driver
         active_contenders: List[str] = []
         eliminated_drivers: List[str] = []
         eliminated_this_round: List[str] = []
@@ -499,6 +580,111 @@ class ChampionshipAnalytics:
             eliminated_drivers=eliminated_drivers,
             eliminated_this_round=eliminated_this_round,
             standings_summary=summary_df,
+            entity_type="driver",
+        )
+
+    def compute_constructor_elimination_status(
+        self,
+        season: int,
+        as_of_round: int,
+        total_rounds: Optional[int] = None,
+        remaining_sprints: Optional[int] = None,
+    ) -> MathematicalEliminationReport:
+        """Calculate mathematical eligibility and elimination for World Constructors' Championship."""
+        # 1. Determine total season rounds
+        if total_rounds is None:
+            season_rounds = self.df_c_stand[self.df_c_stand["season"] == season]["round"].max()
+            if pd.notna(season_rounds) and season_rounds > 0:
+                total_rounds = int(max(season_rounds, 24 if season >= 2024 else 22))
+            else:
+                total_rounds = 24 if season >= 2024 else 22
+
+        remaining_rounds = max(0, total_rounds - as_of_round)
+
+        # 2. Determine remaining sprint count dynamically if not provided
+        if remaining_sprints is None:
+            remaining_sprints = self.get_remaining_sprints(season, as_of_round, total_rounds)
+
+        # 3. Maximum available constructor points remaining (2 cars per team)
+        max_c_race_pts = F1ScoringRules.get_max_constructor_points_per_event(season, has_sprint=False)
+        max_c_sprint_pts = F1ScoringRules.get_max_constructor_points_per_event(season, has_sprint=True) - max_c_race_pts
+        max_remaining_points = (remaining_rounds * max_c_race_pts) + (remaining_sprints * max_c_sprint_pts)
+
+        # 4. Current Standings as of target round
+        cur_standings = self.get_constructor_standings_as_of(season, as_of_round)
+        if cur_standings.empty:
+            raise ValueError(f"No constructor standings available for season {season} as of round {as_of_round}")
+
+        leader_row = cur_standings.iloc[0]
+        leader_id = str(leader_row["constructor_id"])
+        leader_pts = float(leader_row["points"])
+
+        # 5. Prior round standings for elimination delta tracking
+        prev_eliminated_set: Set[str] = set()
+        if as_of_round > 1:
+            try:
+                prev_stand = self.get_constructor_standings_as_of(season, as_of_round - 1)
+                if not prev_stand.empty:
+                    prev_leader_pts = float(prev_stand.iloc[0]["points"])
+                    prev_rem_r = remaining_rounds + 1
+                    prev_rem_sprints = self.get_remaining_sprints(season, as_of_round - 1, total_rounds)
+                    prev_rem_pts = (prev_rem_r * max_c_race_pts) + (prev_rem_sprints * max_c_sprint_pts)
+                    for _, pr in prev_stand.iterrows():
+                        if float(pr["points"]) + prev_rem_pts < prev_leader_pts:
+                            prev_eliminated_set.add(str(pr["constructor_id"]))
+            except Exception:
+                pass
+
+        # 6. Evaluate contention for each constructor
+        active_contenders: List[str] = []
+        eliminated_constructors: List[str] = []
+        eliminated_this_round: List[str] = []
+
+        summary_rows: List[Dict[str, Any]] = []
+
+        for _, row in cur_standings.iterrows():
+            c_id = str(row["constructor_id"])
+            pts = float(row["points"])
+            max_possible = pts + max_remaining_points
+            gap = leader_pts - pts
+
+            is_elim = max_possible < leader_pts
+
+            if is_elim:
+                eliminated_constructors.append(c_id)
+                if c_id not in prev_eliminated_set:
+                    eliminated_this_round.append(c_id)
+            else:
+                active_contenders.append(c_id)
+
+            summary_rows.append({
+                "position": int(row["position"]),
+                "constructor_id": c_id,
+                "current_points": pts,
+                "gap_to_leader": gap,
+                "max_possible_points": max_possible,
+                "is_eliminated": is_elim,
+                "status": "ELIMINATED" if is_elim else "CONTENDER",
+            })
+
+        summary_df = pd.DataFrame(summary_rows)
+
+        return MathematicalEliminationReport(
+            season=season,
+            as_of_round=as_of_round,
+            total_rounds=total_rounds,
+            remaining_rounds=remaining_rounds,
+            remaining_sprints=remaining_sprints,
+            max_remaining_points=max_remaining_points,
+            leader_id=leader_id,
+            leader_points=leader_pts,
+            active_contenders_count=len(active_contenders),
+            eliminated_count=len(eliminated_constructors),
+            active_contenders=active_contenders,
+            eliminated_drivers=eliminated_constructors,
+            eliminated_this_round=eliminated_this_round,
+            standings_summary=summary_df,
+            entity_type="constructor",
         )
 
     # -----------------------------------------------------------------------

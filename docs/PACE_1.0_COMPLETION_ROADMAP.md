@@ -157,8 +157,8 @@ Stages 5.2, 5.3, 5.4, 6.1, 6.2, 7.1-7.3, 8.4 (Full Scope System Hardening & PACE
   - `tests/test_jolpica_client.py`: 17 comprehensive offline unit and integration tests with mocked responses covering transport, retries, rate limits, caching, pagination, schemas, as-of temporal isolation, and elimination math.
   - `docs/JOLPICA_INTEGRATION.md`: Full architectural specification, schemas, verified endpoints, and CLI usage.
   - `main.py`: CLI commands (`--jolpica-status`, `--jolpica-ingest`, `--jolpica-standings`, `--jolpica-reconcile`).
-- **Acceptance Criteria Met:** Production-grade client, 100% verified schema conformity, zero temporal leakage, and 100% agreement on cross-source reconciliation; all 117 tests in project test suite pass.
-- **Deliverables:** `src/data/jolpica_client.py`, `src/data/championship_analytics.py`, `src/data/jolpica_reconciler.py`, `tests/test_jolpica_client.py`, `docs/JOLPICA_INTEGRATION.md`, `docs/STAGE_5_3_JOLPICA_COMPLETION_REPORT.md`.
+- **Acceptance Criteria Met:** Production-grade client, 100% verified schema conformity, zero temporal leakage, dynamic calendar-aware sprint elimination calculation, era-complete scoring rules (1950–2026), and 100% agreement on cross-source reconciliation; all 121 tests in project test suite pass.
+- **Deliverables:** `src/data/jolpica_client.py`, `src/data/championship_analytics.py`, `src/data/jolpica_reconciler.py`, `tests/test_jolpica_client.py` (21 tests), `docs/JOLPICA_INTEGRATION.md`, `docs/STAGE_5_3_JOLPICA_COMPLETION_REPORT.md`, `docs/STAGE_5_3_VERIFICATION_AND_CORRECTION_REPORT.md`.
 - **Criticality:** High (Agreed Scope E).
 - **Required for Las Vegas:** No (Championship standings baseline already operates on local historical results).
 

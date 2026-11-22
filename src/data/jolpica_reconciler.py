@@ -199,6 +199,124 @@ class JolpicaReconciler:
             summary_message=msg,
         )
 
+    def reconcile_constructor_standings(
+        self,
+        df_jolpica: pd.DataFrame,
+        df_reference: pd.DataFrame,
+        target_seasons: Optional[List[int]] = None,
+        reference_source_name: str = "kaggle_archive",
+    ) -> JolpicaReconciliationReport:
+        """Reconcile constructor standings between Jolpica and reference historical standings."""
+        authoritative_rules = {
+            "standings_official_positions": "Jolpica takes precedence as official FIA Ergast successor",
+            "historical_pre_2023": "Kaggle archive retained for offline resilience",
+        }
+
+        if df_jolpica.empty and df_reference.empty:
+            return JolpicaReconciliationReport(
+                dataset_category="constructor_standings",
+                seasons_evaluated=[],
+                authoritative_rules=authoritative_rules,
+                summary_message="Both Jolpica and reference constructor standings are empty.",
+            )
+
+        j_df = df_jolpica.copy()
+        r_df = df_reference.copy()
+
+        if target_seasons:
+            if not j_df.empty and "season" in j_df.columns:
+                j_df = j_df[j_df["season"].isin(target_seasons)]
+            if not r_df.empty and "season" in r_df.columns:
+                r_df = r_df[r_df["season"].isin(target_seasons)]
+
+        seasons_eval = sorted(list(set(j_df["season"].dropna()).union(set(r_df["season"].dropna()))))
+
+        j_map = {
+            (int(r["season"]), int(r["round"]), str(r["constructor_id"])): r
+            for _, r in j_df.iterrows()
+        }
+        r_map = {
+            (int(r["season"]), int(r["round"]), str(r["constructor_id"])): r
+            for _, r in r_df.iterrows()
+        }
+
+        j_keys = set(j_map.keys())
+        r_keys = set(r_map.keys())
+
+        overlap_keys = j_keys.intersection(r_keys)
+        j_only_keys = j_keys - r_keys
+        r_only_keys = r_keys - j_keys
+
+        identical_count = 0
+        conflicts: List[JolpicaConflict] = []
+
+        fields_to_check = ["points", "position", "wins"]
+
+        for key in sorted(list(overlap_keys)):
+            j_row = j_map[key]
+            r_row = r_map[key]
+
+            is_match = True
+            for f in fields_to_check:
+                j_val = j_row.get(f)
+                r_val = r_row.get(f)
+
+                if pd.notna(j_val) and pd.notna(r_val):
+                    if isinstance(j_val, (int, float)) and isinstance(r_val, (int, float)):
+                        diff = abs(float(j_val) - float(r_val))
+                        if diff > 0.05:
+                            is_match = False
+                            conflicts.append(JolpicaConflict(
+                                dataset_category="constructor_standings",
+                                season=key[0],
+                                round=key[1],
+                                entity_id=key[2],
+                                field_name=f,
+                                jolpica_value=float(j_val),
+                                reference_value=float(r_val),
+                                reference_source=reference_source_name,
+                                authoritative_source="jolpica.ergast",
+                                resolution_action="Jolpica official standing accepted",
+                            ))
+                    else:
+                        if str(j_val).strip() != str(r_val).strip():
+                            is_match = False
+                            conflicts.append(JolpicaConflict(
+                                dataset_category="constructor_standings",
+                                season=key[0],
+                                round=key[1],
+                                entity_id=key[2],
+                                field_name=f,
+                                jolpica_value=j_val,
+                                reference_value=r_val,
+                                reference_source=reference_source_name,
+                                authoritative_source="jolpica.ergast",
+                                resolution_action="Jolpica official standing accepted",
+                            ))
+
+            if is_match:
+                identical_count += 1
+
+        msg = (
+            f"Constructor standings reconciliation across seasons {seasons_eval}: {len(overlap_keys)} overlapping records, "
+            f"{identical_count} identical ({((identical_count/len(overlap_keys))*100 if overlap_keys else 100):.2f}%), "
+            f"{len(conflicts)} discrepancies detected."
+        )
+
+        return JolpicaReconciliationReport(
+            dataset_category="constructor_standings",
+            seasons_evaluated=[int(s) for s in seasons_eval],
+            total_jolpica_records=len(j_df),
+            total_reference_records=len(r_df),
+            overlap_count=len(overlap_keys),
+            identical_count=identical_count,
+            conflicts_detected=conflicts,
+            jolpica_only_count=len(j_only_keys),
+            reference_only_count=len(r_only_keys),
+            authoritative_rules=authoritative_rules,
+            summary_message=msg,
+        )
+
     def reconcile_race_results(
         self,
         df_jolpica: pd.DataFrame,

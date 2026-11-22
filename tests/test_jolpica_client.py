@@ -368,6 +368,170 @@ def test_mathematical_elimination_calculation():
     assert report.eliminated_count == 1
 
 
+def test_mathematical_elimination_2024_round_20_piastri_contender():
+    """Verify that in 2024 Round 20 (Mexico City GP), Piastri remains an active CONTENDER.
+    
+    4 Grands Prix remaining (4 * 26 = 104 pts).
+    2 Sprints remaining: São Paulo R21 and Qatar R23 (2 * 8 = 16 pts).
+    Total maximum remaining points = 120.0 pts.
+    Verstappen has 362.0 pts.
+    Piastri has 251.0 pts: 251 + 120 = 371.0 >= 362.0 -> CONTENDER.
+    Sainz has 240.0 pts: 240 + 120 = 360.0 < 362.0 -> ELIMINATED this round.
+    """
+    df_stand_r20 = pd.DataFrame([
+        {"season": 2024, "round": 20, "driver_id": "max_verstappen", "points": 362.0, "position": 1, "wins": 7, "position_text": "1", "source_api": "test", "retrieved_at": ""},
+        {"season": 2024, "round": 20, "driver_id": "norris", "points": 315.0, "position": 2, "wins": 3, "position_text": "2", "source_api": "test", "retrieved_at": ""},
+        {"season": 2024, "round": 20, "driver_id": "leclerc", "points": 291.0, "position": 3, "wins": 3, "position_text": "3", "source_api": "test", "retrieved_at": ""},
+        {"season": 2024, "round": 20, "driver_id": "piastri", "points": 251.0, "position": 4, "wins": 2, "position_text": "4", "source_api": "test", "retrieved_at": ""},
+        {"season": 2024, "round": 20, "driver_id": "sainz", "points": 240.0, "position": 5, "wins": 2, "position_text": "5", "source_api": "test", "retrieved_at": ""},
+        {"season": 2024, "round": 20, "driver_id": "hamilton", "points": 189.0, "position": 6, "wins": 2, "position_text": "6", "source_api": "test", "retrieved_at": ""},
+    ])
+    # Standings after Round 19 for prior-elimination delta tracking
+    df_stand_r19 = pd.DataFrame([
+        {"season": 2024, "round": 19, "driver_id": "max_verstappen", "points": 354.0, "position": 1, "wins": 7, "position_text": "1", "source_api": "test", "retrieved_at": ""},
+        {"season": 2024, "round": 19, "driver_id": "norris", "points": 297.0, "position": 2, "wins": 3, "position_text": "2", "source_api": "test", "retrieved_at": ""},
+        {"season": 2024, "round": 19, "driver_id": "leclerc", "points": 275.0, "position": 3, "wins": 3, "position_text": "3", "source_api": "test", "retrieved_at": ""},
+        {"season": 2024, "round": 19, "driver_id": "piastri", "points": 247.0, "position": 4, "wins": 2, "position_text": "4", "source_api": "test", "retrieved_at": ""},
+        {"season": 2024, "round": 19, "driver_id": "sainz", "points": 215.0, "position": 5, "wins": 1, "position_text": "5", "source_api": "test", "retrieved_at": ""},
+        {"season": 2024, "round": 19, "driver_id": "hamilton", "points": 177.0, "position": 6, "wins": 2, "position_text": "6", "source_api": "test", "retrieved_at": ""},
+    ])
+    df_sprints = pd.DataFrame([
+        {"season": 2024, "round": 5},
+        {"season": 2024, "round": 6},
+        {"season": 2024, "round": 11},
+        {"season": 2024, "round": 19},
+        {"season": 2024, "round": 21},  # São Paulo
+        {"season": 2024, "round": 23},  # Qatar
+    ])
+
+    analytics = ChampionshipAnalytics(
+        df_driver_standings=pd.concat([df_stand_r19, df_stand_r20], ignore_index=True),
+        df_sprints=df_sprints,
+    )
+
+    report = analytics.compute_elimination_status(season=2024, as_of_round=20, total_rounds=24)
+
+    assert report.remaining_rounds == 4
+    assert report.remaining_sprints == 2
+    assert report.max_remaining_points == 120.0
+    assert report.leader_id == "max_verstappen"
+    assert report.leader_points == 362.0
+
+    # Contenders verification
+    assert report.active_contenders_count == 4
+    assert "max_verstappen" in report.active_contenders
+    assert "norris" in report.active_contenders
+    assert "leclerc" in report.active_contenders
+    assert "piastri" in report.active_contenders  # CRITICAL: Piastri must be a contender!
+
+    # Elimination verification
+    assert "sainz" in report.eliminated_drivers
+    assert "hamilton" in report.eliminated_drivers
+    assert report.eliminated_this_round == ["sainz"]  # Sainz newly eliminated at R20; Hamilton was eliminated at R19
+
+
+def test_constructor_elimination_2024_round_20():
+    """Verify constructor elimination after 2024 Round 20 with Sprint points included.
+    
+    4 Grands Prix remaining (4 * 44 = 176 pts).
+    2 Sprints remaining (2 * 15 = 30 pts).
+    Total maximum constructor points = 206.0 pts.
+    McLaren: 566 pts.
+    Mercedes: 366 pts: 366 + 206 = 572.0 >= 566.0 -> CONTENDER.
+    Aston Martin: 86 pts: 86 + 206 = 292.0 < 566.0 -> ELIMINATED.
+    """
+    df_c_r20 = pd.DataFrame([
+        {"season": 2024, "round": 20, "constructor_id": "mclaren", "points": 566.0, "position": 1, "wins": 5, "position_text": "1", "source_api": "test", "retrieved_at": ""},
+        {"season": 2024, "round": 20, "constructor_id": "ferrari", "points": 537.0, "position": 2, "wins": 5, "position_text": "2", "source_api": "test", "retrieved_at": ""},
+        {"season": 2024, "round": 20, "constructor_id": "red_bull", "points": 512.0, "position": 3, "wins": 7, "position_text": "3", "source_api": "test", "retrieved_at": ""},
+        {"season": 2024, "round": 20, "constructor_id": "mercedes", "points": 366.0, "position": 4, "wins": 3, "position_text": "4", "source_api": "test", "retrieved_at": ""},
+        {"season": 2024, "round": 20, "constructor_id": "aston_martin", "points": 86.0, "position": 5, "wins": 0, "position_text": "5", "source_api": "test", "retrieved_at": ""},
+    ])
+    df_sprints = pd.DataFrame([
+        {"season": 2024, "round": 5},
+        {"season": 2024, "round": 6},
+        {"season": 2024, "round": 11},
+        {"season": 2024, "round": 19},
+        {"season": 2024, "round": 21},
+        {"season": 2024, "round": 23},
+    ])
+
+    analytics = ChampionshipAnalytics(
+        df_constructor_standings=df_c_r20,
+        df_sprints=df_sprints,
+    )
+
+    c_rep = analytics.compute_constructor_elimination_status(season=2024, as_of_round=20, total_rounds=24)
+
+    assert c_rep.remaining_rounds == 4
+    assert c_rep.remaining_sprints == 2
+    assert c_rep.max_remaining_points == 206.0
+    assert c_rep.leader_id == "mclaren"
+    assert c_rep.active_contenders_count == 4
+    assert "mercedes" in c_rep.active_contenders  # Mercedes active because 366 + 206 = 572 > 566
+    assert "aston_martin" in c_rep.eliminated_drivers
+
+
+def test_scoring_rules_era_coverage():
+    """Verify exact regulatory scoring distributions across all historical and modern eras."""
+    # 1. 1950-1959 era: 8-6-4-3-2 + 1 FL
+    assert F1ScoringRules.get_gp_points_distribution(1955) == [8.0, 6.0, 4.0, 3.0, 2.0]
+    assert F1ScoringRules.has_fastest_lap_point(1955) is True
+    assert F1ScoringRules.fastest_lap_requires_top_10(1955) is False
+    assert F1ScoringRules.get_max_points_per_event(1955) == 9.0
+    assert F1ScoringRules.get_max_constructor_points_per_event(1955) == 0.0  # WCC started 1958
+
+    # 2. 1960: 8-6-4-3-2-1, no FL
+    assert F1ScoringRules.get_gp_points_distribution(1960) == [8.0, 6.0, 4.0, 3.0, 2.0, 1.0]
+    assert F1ScoringRules.has_fastest_lap_point(1960) is False
+    assert F1ScoringRules.get_max_points_per_event(1960) == 8.0
+
+    # 3. 1961-1978: 9-6-4-3-2-1, only 1 car scored for WCC
+    assert F1ScoringRules.get_gp_points_distribution(1975) == [9.0, 6.0, 4.0, 3.0, 2.0, 1.0]
+    assert F1ScoringRules.has_fastest_lap_point(1975) is False
+    assert F1ScoringRules.get_max_points_per_event(1975) == 9.0
+    assert F1ScoringRules.get_max_constructor_points_per_event(1975) == 9.0
+
+    # 4. 1979-1990: 9-6-4-3-2-1, 2 cars scored for WCC
+    assert F1ScoringRules.get_max_constructor_points_per_event(1985) == 15.0  # 9 + 6
+
+    # 5. 1991-2002: 10-6-4-3-2-1
+    assert F1ScoringRules.get_gp_points_distribution(1998) == [10.0, 6.0, 4.0, 3.0, 2.0, 1.0]
+    assert F1ScoringRules.get_max_points_per_event(1998) == 10.0
+    assert F1ScoringRules.get_max_constructor_points_per_event(1998) == 16.0  # 10 + 6
+
+    # 6. 2003-2009: 10-8-6-5-4-3-2-1
+    assert F1ScoringRules.get_gp_points_distribution(2005) == [10.0, 8.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0]
+    assert F1ScoringRules.get_max_points_per_event(2005) == 10.0
+    assert F1ScoringRules.get_max_constructor_points_per_event(2005) == 18.0  # 10 + 8
+
+    # 7. 2010-2018: 25-18-15-12-10-8-6-4-2-1, no FL
+    assert F1ScoringRules.get_gp_points_distribution(2015) == [25.0, 18.0, 15.0, 12.0, 10.0, 8.0, 6.0, 4.0, 2.0, 1.0]
+    assert F1ScoringRules.has_fastest_lap_point(2015) is False
+    assert F1ScoringRules.get_max_points_per_event(2015) == 25.0
+    assert F1ScoringRules.get_max_constructor_points_per_event(2015) == 43.0  # 25 + 18
+
+    # 8. 2019-2024: 25-18-15-12-10-8-6-4-2-1 + 1 FL (top 10 finish)
+    assert F1ScoringRules.has_fastest_lap_point(2024) is True
+    assert F1ScoringRules.fastest_lap_requires_top_10(2024) is True
+    assert F1ScoringRules.get_max_points_per_event(2024, has_sprint=False) == 26.0
+    assert F1ScoringRules.get_max_points_per_event(2024, has_sprint=True) == 34.0  # 26 + 8
+    assert F1ScoringRules.get_max_constructor_points_per_event(2024, has_sprint=False) == 44.0  # 25 + 18 + 1
+    assert F1ScoringRules.get_max_constructor_points_per_event(2024, has_sprint=True) == 59.0   # 44 + 15
+
+    # 9. 2025+: Fastest lap officially abolished by FIA starting in 2025
+    assert F1ScoringRules.has_fastest_lap_point(2025) is False
+    assert F1ScoringRules.has_fastest_lap_point(2026) is False
+    assert F1ScoringRules.get_max_points_per_event(2025, has_sprint=False) == 25.0
+    assert F1ScoringRules.get_max_points_per_event(2025, has_sprint=True) == 33.0  # 25 + 8
+    assert F1ScoringRules.get_max_constructor_points_per_event(2025, has_sprint=False) == 43.0
+    assert F1ScoringRules.get_max_constructor_points_per_event(2025, has_sprint=True) == 58.0   # 43 + 15
+
+    # 10. Sprints: 2021 (top 3) vs 2022+ (top 8)
+    assert F1ScoringRules.get_sprint_points_distribution(2021) == [3.0, 2.0, 1.0]
+    assert F1ScoringRules.get_sprint_points_distribution(2024) == [8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0]
+
+
 def test_scoring_rules_variations():
     """Verify regulation scoring differences across historical and modern eras."""
     # Modern 2024: 25 win + 1 FL = 26 pts
@@ -378,6 +542,26 @@ def test_scoring_rules_variations():
     assert F1ScoringRules.get_max_points_per_event(2026, has_sprint=False) == 25.0
     # 2005: 10 pts
     assert F1ScoringRules.get_max_points_per_event(2005, has_sprint=False) == 10.0
+
+
+def test_reconcile_constructor_standings():
+    """Verify cross-source reconciler detects matches and conflicts for constructor standings."""
+    df_j = pd.DataFrame([
+        {"season": 2024, "round": 1, "constructor_id": "red_bull", "points": 44.0, "position": 1, "wins": 1},
+        {"season": 2024, "round": 1, "constructor_id": "ferrari", "points": 27.0, "position": 2, "wins": 0},
+    ])
+    df_ref = pd.DataFrame([
+        {"season": 2024, "round": 1, "constructor_id": "red_bull", "points": 44.0, "position": 1, "wins": 1},
+        {"season": 2024, "round": 1, "constructor_id": "ferrari", "points": 25.0, "position": 3, "wins": 0},  # Discrepancy
+    ])
+
+    reconciler = JolpicaReconciler()
+    rep = reconciler.reconcile_constructor_standings(df_j, df_ref, target_seasons=[2024])
+
+    assert rep.overlap_count == 2
+    assert rep.identical_count == 1
+    assert rep.conflict_count == 2  # points and position differ for ferrari
+    assert rep.conflicts_detected[0].entity_id == "ferrari"
 
 
 def test_evaluate_championship_outcomes_simulation_contract():
