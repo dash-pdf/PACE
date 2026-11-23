@@ -7,6 +7,7 @@ An engineering-driven Formula 1 race prediction system.
 import sys
 import argparse
 import logging
+from pathlib import Path
 import pandas as pd
 from src.data.pipeline import HistoricalDataPipeline
 
@@ -229,9 +230,51 @@ def main() -> int:
         help="Run cross-source reconciliation comparing TUM geometry against PACE canonical definitions",
     )
     parser.add_argument(
+        "--season",
+        type=int,
+        default=2024,
+        help="Target season for integration and reconciliation analysis (default: 2024)",
+    )
+    parser.add_argument(
+        "--event",
+        type=str,
+        default=None,
+        help="Specific event name, round number, or canonical event ID for cross-source inspection",
+    )
+    parser.add_argument(
+        "--integration-status",
+        action="store_true",
+        help="Check overall integration status across all five data sources (FastF1, Kaggle, Jolpica, OpenF1, TUM)",
+    )
+    parser.add_argument(
+        "--integration-inventory",
+        action="store_true",
+        help="Display unified inventory of datasets, record counts, schemas, and missing value semantics",
+    )
+    parser.add_argument(
+        "--integration-reconcile",
+        action="store_true",
+        help="Run cross-source reconciliation across results, standings, timing, and geometry (supports --season, --event)",
+    )
+    parser.add_argument(
+        "--integration-quality",
+        action="store_true",
+        help="Run multi-dimensional data quality evaluation across completeness, consistency, validity, and reconciliation coverage",
+    )
+    parser.add_argument(
+        "--integration-lineage",
+        action="store_true",
+        help="Display sample provenance and data lineage records from the persistent ledger",
+    )
+    parser.add_argument(
+        "--integration-report",
+        action="store_true",
+        help="Generate and display the comprehensive cross-source integration and reconciliation report",
+    )
+    parser.add_argument(
         "--version",
         action="version",
-        version="PACE 0.5.0-dev (Stage 5.5: TUM Racetrack Database Integration)",
+        version="PACE 0.5.0-dev (Stage 5.6: Cross-Source Integration & Data Reconciliation)",
     )
 
     args = parser.parse_args()
@@ -274,6 +317,7 @@ def main() -> int:
         print("      * Jolpica F1 API & Championship Analytics Engine (Stage 5.3 Implemented)")
         print("      * OpenF1 Race Intelligence Integration (Stage 5.4 Implemented)")
         print("      * TUM Racetrack Database Geometry & Trajectory Engine (Stage 5.5 Implemented)")
+        print("      * Cross-Source Integration & Data Reconciliation (Stage 5.6 Implemented)")
         return 0
 
     if args.collect_circuit_history:
@@ -866,7 +910,198 @@ def main() -> int:
 
         return 0
 
-    if args.run_models:
+    if args.integration_status:
+        from src.data.canonical_registry import get_canonical_registry
+        from src.data.storage import (
+            DEFAULT_BASE_DIR,
+            get_historical_path,
+            get_jolpica_path,
+            get_openf1_path,
+            get_tum_path,
+        )
+        registry = get_canonical_registry()
+        print("\n" + "=" * 78)
+        print("PACE 1.0 — CROSS-SOURCE DATA INTEGRATION STATUS (STAGE 5.6)")
+        print("=" * 78)
+        print("\nIntegrated Data Sources:")
+        print("  1. FastF1:                   High-resolution timing, telemetry, sector loops (2023-2026)")
+        print("  2. Kaggle F1 Archive:        Multi-decade historical intelligence (1950-2024)")
+        print("  3. Jolpica API:              Championship standings & official FIA race results (2024)")
+        print("  4. OpenF1:                   Session streams, interval telemetry, race control, weather")
+        print("  5. TUM Racetrack Database:   2D coordinate geometry & optimal trajectory curves (25 circuits)")
+
+        print("\nCanonical Entity Registry:")
+        print(f"  * Drivers Registered:        {len(registry._drivers)} ({len(registry.list_drivers(active_only=True))} active in 2026)")
+        print(f"  * Constructors Registered:   {len(registry._constructors)} ({len(registry.list_constructors(active_only=True))} active in 2026)")
+        print(f"  * Circuits Registered:       {len(registry._circuits)}")
+        print(f"  * Versioned Circuit Layouts: {len(registry._circuit_layouts)}")
+        print(f"  * Driver Substitutions:      {len(registry._driver_substitutions)}")
+        print(f"  * Constructor Lineages:      {len(registry._constructor_lineages)}")
+
+        print("\nHistorical Storage Layer Status (data/historical):")
+        sources = [
+            ("Kaggle Historical Results", get_historical_path("race_results")),
+            ("Kaggle Driver Standings", get_historical_path("driver_standings")),
+            ("Jolpica 2024 Standings", get_jolpica_path("jolpica_driver_standings_2024.parquet")),
+            ("Jolpica 2024 Race Results", get_jolpica_path("jolpica_race_results_2024.parquet")),
+            ("FastF1 Historical Laps", get_historical_path("laps")),
+            ("TUM Circuits Summary", get_tum_path("tum_circuits_summary.parquet")),
+            ("Unified GP Events", DEFAULT_BASE_DIR / "data" / "historical" / "unified_events.parquet"),
+            ("Data Quality Scorecard", DEFAULT_BASE_DIR / "data" / "historical" / "data_quality_scorecard.parquet"),
+        ]
+        for name, p in sources:
+            status = "FOUND" if p.exists() else "MISSING"
+            size = f"{p.stat().st_size / 1024:.1f} KB" if p.exists() else "-"
+            print(f"  * {name:<30} [{status:<7}] {size:>10} ({p.name})")
+
+        return 0
+
+    if args.integration_inventory:
+        from src.data.unified_contracts import list_data_contracts
+        import pyarrow.parquet as pq
+
+        print("\n" + "=" * 105)
+        print("PACE 1.0 — UNIFIED DATA CONTRACTS INVENTORY")
+        print("=" * 105)
+        contracts = list_data_contracts()
+        print(f"\nRegistered Data Contracts: {len(contracts)}\n")
+        print(f"{'Domain':<22} | {'Schema':<32} | {'Primary Key':<35} | {'Preferred Source'}")
+        print("-" * 120)
+        for c in contracts:
+            pk_str = ", ".join(c.primary_key)
+            print(f"{c.domain:<22} | {c.canonical_schema_name:<32} | {pk_str:<35} | {c.preferred_source[:30]}")
+
+        print("\n" + "=" * 105)
+        print("PERSISTED HISTORICAL DATASETS")
+        print("=" * 105)
+        hist_dir = Path("data/historical")
+        parquet_files = sorted(list(hist_dir.glob("*.parquet")) + list(hist_dir.glob("*/*.parquet")))
+        print(f"{'Dataset File':<45} | {'Rows':<8} | {'Cols':<6} | {'Size':<10}")
+        print("-" * 75)
+        for pf in parquet_files:
+            try:
+                table = pq.read_table(pf)
+                rel_path = str(pf.relative_to(hist_dir))
+                size_str = f"{pf.stat().st_size / 1024:.1f} KB"
+                print(f"{rel_path:<45} | {table.num_rows:<8} | {table.num_columns:<6} | {size_str:<10}")
+            except Exception:
+                pass
+
+        return 0
+
+    if args.integration_reconcile:
+        from src.data.cross_source_reconciler import CrossSourceReconciler
+        reconciler = CrossSourceReconciler()
+        target_season = args.season
+        rnd = None
+        if args.event and str(args.event).isdigit():
+            rnd = int(args.event)
+
+        print(f"\nExecuting Cross-Source Reconciliation for Season {target_season}...")
+        report = reconciler.execute_full_reconciliation(target_seasons=[target_season], round_num=rnd)
+        print("\n" + report.get_summary_text())
+
+        print("\nDomain Reconciliation Detail:")
+        for dom, s in report.domain_summaries.items():
+            print(f"\n--- Domain: {dom.upper()} ({s.source_a} vs {s.source_b}) ---")
+            print(f"  * Overlap Records Evaluated:       {s.overlap_count}")
+            print(f"  * Exact Identical Matches:         {s.identical_count}")
+            print(f"  * Equivalent Converted Matches:    {s.equivalent_converted_count}")
+            print(f"  * Discrepancies / Conflicts:       {s.conflict_count}")
+            print(f"  * Match Rate:                      {s.match_rate_pct:.2f}%")
+            if s.conflicts_detected:
+                print("  * Sample Detected Conflicts:")
+                for c in s.conflicts_detected[:5]:
+                    print(f"      - [{c.field_name}] {c.entity_id}: {c.source_a}={c.val_a_str} vs {c.source_b}={c.val_b_str} -> Selected {c.selected_source} ({c.selection_reason})")
+
+        return 0
+
+    if args.integration_quality:
+        from src.data.quality_framework import DataQualityEvaluator
+        evaluator = DataQualityEvaluator()
+        print("\nExecuting Multi-Dimensional Data Quality Evaluation...")
+        scorecards = evaluator.execute_quality_evaluation()
+
+        print("\n" + "=" * 105)
+        print("PACE 1.0 — DATA QUALITY SCORECARD BY SOURCE AND DOMAIN")
+        print("=" * 105)
+        print(f"{'Source':<10} | {'Category':<22} | {'Records':<8} | {'Complete%':<10} | {'Consistent%':<12} | {'Valid%':<8} | {'Recov%':<8} | {'Unres'}")
+        print("-" * 105)
+        for sc in scorecards:
+            print(
+                f"{sc.source_name:<10} | {sc.dataset_category:<22} | {sc.records_evaluated:<8} | "
+                f"{sc.completeness_pct:>8.2f}% | {sc.consistency_pct:>10.2f}% | {sc.validity_pct:>6.2f}% | "
+                f"{sc.reconciliation_coverage_pct:>6.2f}% | {sc.unresolved_count:>5}"
+            )
+        print("=" * 105)
+        print("Quality Dimensions Legend:")
+        print("  * Completeness: Required non-null attributes present (respects NOT_APPLICABLE).")
+        print("  * Consistency:  Referential integrity across drivers, constructors, circuits.")
+        print("  * Validity:     Constraint adherence (valid points, non-negative laps, physical bounds).")
+        print("  * Recov%:       Reconciliation coverage against secondary corroborating source.")
+
+        return 0
+
+    if args.integration_lineage:
+        from src.data.data_lineage import DataLineageTracker
+        tracker = DataLineageTracker()
+        summary = tracker.get_provenance_summary()
+        print("\n" + "=" * 80)
+        print("PACE 1.0 — PROVENANCE AND DATA LINEAGE LEDGER")
+        print("=" * 80)
+        print(f"Total Lineage Records in Ledger: {summary['total_records']}")
+        print("\nContributing Sources:")
+        for src, cnt in summary["sources"].items():
+            print(f"  * {src:<25}: {cnt} records")
+        print("\nDomains Audited:")
+        for dom, cnt in summary["domains"].items():
+            print(f"  * {dom:<25}: {cnt} records")
+        print("\nReconciliation Outcomes:")
+        for outc, cnt in summary["outcomes"].items():
+            print(f"  * {outc:<25}: {cnt} records")
+
+        sample_records = tracker.list_lineage(limit=10)
+        if sample_records:
+            print("\nRecent Provenance Audit Records:")
+            for r in sample_records:
+                print(f"  - [{r.domain}] {r.canonical_record_id}: Source={r.source_api} (ID={r.source_record_id}) -> Outcome={r.reconciliation_outcome} (Selected: {r.selected_source})")
+
+        return 0
+
+    if args.integration_report:
+        from src.data.cross_source_reconciler import CrossSourceReconciler
+        from src.data.quality_framework import DataQualityEvaluator
+        from src.data.data_lineage import DataLineageTracker
+
+        reconciler = CrossSourceReconciler()
+        evaluator = DataQualityEvaluator()
+        tracker = DataLineageTracker()
+
+        print("\nGenerating Complete PACE 1.0 Cross-Source Integration & Reconciliation Report...")
+        recon_report = reconciler.execute_full_reconciliation(target_seasons=[2024])
+        scorecards = evaluator.execute_quality_evaluation()
+        lineage_summary = tracker.get_provenance_summary()
+
+        print("\n" + recon_report.get_summary_text())
+
+        print("\n" + "=" * 105)
+        print("DATA QUALITY SCORECARD")
+        print("=" * 105)
+        for sc in scorecards:
+            print(
+                f"  [{sc.source_name.upper():<7} : {sc.dataset_category:<18}] Records: {sc.records_evaluated:<6} | "
+                f"Complete: {sc.completeness_pct:.1f}% | Consistent: {sc.consistency_pct:.1f}% | "
+                f"Valid: {sc.validity_pct:.1f}% | Recov: {sc.reconciliation_coverage_pct:.1f}%"
+            )
+
+        print("\n" + "=" * 105)
+        print("PROVENANCE & DATA LINEAGE")
+        print("=" * 105)
+        print(f"  * Total Ledger Records: {lineage_summary['total_records']}")
+        print(f"  * Verified Data Lineage File: data/historical/data_lineage.parquet")
+        print("=" * 105)
+
+        return 0
         import pandas as pd
         from src.features.pipeline import FeaturePipeline
         from src.evaluation.backtest import WalkForwardBacktester

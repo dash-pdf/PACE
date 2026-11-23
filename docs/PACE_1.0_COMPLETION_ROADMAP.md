@@ -199,6 +199,23 @@ Stages 5.2, 5.3, 5.4, 6.1, 6.2, 7.1-7.3, 8.4 (Full Scope System Hardening & PACE
 - **Criticality:** Critical (Agreed Scope D).
 - **Required for Las Vegas:** Yes (Geometric baseline established for championship circuits).
 
+#### Stage 5.6: Cross-Source Integration and Data Reconciliation [COMPLETED]
+- **Objective:** Establish a unified, traceable data layer synthesizing all five data sources (FastF1, Kaggle, Jolpica, OpenF1, TUM), reconciling overlapping domains and enforcing explicit source authority.
+- **Implemented Architecture:**
+  - `src/data/unified_contracts.py`: Standard domain contracts across 13 domains, SessionType/SessionStatus, MissingValueSemantics, and DiscrepancyType taxonomies.
+  - `src/data/source_authority.py`: Domain and field-level authority matrix, calibrated tolerances (10ms flying laps), and winning-source selection logic.
+  - `src/data/canonical_registry.py`: Enhanced with versioned circuit layouts (`CanonicalCircuitLayout`), driver substitutions registry (`DriverSubstitution`), multi-era constructor lineages (`ConstructorLineage`), and same-circuit multi-event disambiguation (2020 Austrian vs Styrian GP).
+  - `src/data/cross_source_reconciler.py`: Master reconciliation engine auditing results, standings, timing, and circuit geometry. Resolves known audit anomalies (Jolpica 30-row limit, Kaggle 91 duplicate shared-drive records).
+  - `src/data/data_lineage.py`: Persistent provenance ledger (`data/historical/data_lineage.parquet`, 569 audit records).
+  - `src/data/quality_framework.py`: Multi-dimensional quality evaluation (Completeness, Consistency, Validity, Reconciliation Coverage).
+  - `src/data/schemas.py`: 5 PyArrow schemas (`UNIFIED_EVENTS_SCHEMA`, `UNIFIED_SESSIONS_SCHEMA`, `CROSS_SOURCE_RECONCILIATION_SCHEMA`, `DATA_QUALITY_SCORECARD_SCHEMA`, `DATA_LINEAGE_SCHEMA`).
+  - `main.py`: Full CLI integration (`--integration-status`, `--integration-inventory`, `--integration-reconcile`, `--integration-quality`, `--integration-lineage`, `--integration-report`).
+  - Documentation: `docs/phase5_6_cross_source_integration_report.md`.
+- **Acceptance Criteria Met:** 100% agreement across evaluated overlapping domains; 12 dedicated integration tests passing; full PACE regression suite (166 tests) passing with zero regressions.
+- **Deliverables:** `src/data/unified_contracts.py`, `src/data/source_authority.py`, `src/data/cross_source_reconciler.py`, `src/data/data_lineage.py`, `src/data/quality_framework.py`, `tests/test_cross_source_integration.py`, `docs/phase5_6_cross_source_integration_report.md`.
+- **Criticality:** Critical.
+- **Required for Las Vegas:** Yes (Provides unified data foundation for simulation and predictive pipelines).
+
 ---
 
 ### Phase 6: Advanced Performance Engineering & Telemetry Analysis

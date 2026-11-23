@@ -584,3 +584,92 @@ TUM_CORNER_PROFILE_SCHEMA = pa.schema([
     ("source_api", pa.string()),
     ("retrieved_at", pa.string()),
 ])
+
+# ---------------------------------------------------------------------------
+# Stage 5.6: Cross-Source Integration & Reconciliation Schemas
+# ---------------------------------------------------------------------------
+
+# Unified Grand Prix Event Schema
+UNIFIED_EVENTS_SCHEMA = pa.schema([
+    ("canonical_event_id", pa.string()),    # Format: '{season}_{round:02d}_{circuit_id}'
+    ("season", pa.int32()),                 # Championship year
+    ("round", pa.int32()),                  # Championship round
+    ("official_name", pa.string()),         # Official title (e.g. 'Formula 1 Heineken Silver Las Vegas Grand Prix 2024')
+    ("event_name", pa.string()),            # Display title (e.g. 'Las Vegas Grand Prix')
+    ("circuit_id", pa.string()),            # Canonical circuit ID
+    ("circuit_layout_id", pa.string()),     # Versioned circuit layout ID (e.g. 'vegas:2023_present')
+    ("country", pa.string()),               # Host country
+    ("locality", pa.string()),              # City / locality
+    ("event_date", pa.string()),            # Sunday race date (YYYY-MM-DD)
+    ("has_sprint", pa.bool_()),             # True if Sprint weekend
+    ("source_event_keys_json", pa.string()),# JSON serialized source mapping keys
+    ("source_apis", pa.string()),           # Comma-separated contributing sources
+    ("retrieved_at", pa.string()),
+])
+
+# Unified Event Session Schema
+UNIFIED_SESSIONS_SCHEMA = pa.schema([
+    ("canonical_session_id", pa.string()),  # Format: '{season}_{round:02d}_{session_type}'
+    ("canonical_event_id", pa.string()),    # Linked event ID
+    ("season", pa.int32()),
+    ("round", pa.int32()),
+    ("session_type", pa.string()),          # 'fp1', 'fp2', 'fp3', 'qualifying', 'sprint_qualifying', 'sprint', 'race'
+    ("session_name", pa.string()),          # Full session name
+    ("circuit_id", pa.string()),
+    ("circuit_layout_id", pa.string()),
+    ("start_time_utc", pa.string()),        # ISO-8601 UTC timestamp
+    ("end_time_utc", pa.string()),          # ISO-8601 UTC timestamp
+    ("original_tz", pa.string()),           # Original offset or timezone name if available
+    ("original_start_time", pa.string()),   # Unaltered source timestamp string
+    ("status", pa.string()),                # 'SCHEDULED', 'COMPLETED', 'CANCELLED', 'ABANDONED'
+    ("source_session_keys_json", pa.string()),# JSON serialized source keys (e.g. openf1 session_key)
+    ("retrieved_at", pa.string()),
+])
+
+# Cross-Source Discrepancy & Reconciliation Record Schema
+CROSS_SOURCE_RECONCILIATION_SCHEMA = pa.schema([
+    ("domain", pa.string()),                # 'results', 'standings', 'timing', 'stints', 'weather', 'geometry'
+    ("entity_id", pa.string()),             # e.g., driver_id, constructor_id, circuit_id
+    ("season", pa.int32()),
+    ("round", pa.int32()),
+    ("session_type", pa.string()),
+    ("field_name", pa.string()),            # e.g., 'finish_position', 'lap_time_ms', 'points'
+    ("source_a", pa.string()),              # Primary/first source
+    ("val_a_str", pa.string()),
+    ("source_b", pa.string()),              # Comparator/secondary source
+    ("val_b_str", pa.string()),
+    ("discrepancy_type", pa.string()),      # 'EXACT_MATCH', 'EQUIVALENT_CONVERTED', 'DIFFERENT_DEFINITION', etc.
+    ("absolute_delta", pa.float64()),       # Numerical delta if applicable
+    ("tolerance_applied", pa.float64()),    # Numerical tolerance threshold
+    ("selected_source", pa.string()),       # Winning authoritative source
+    ("selection_reason", pa.string()),      # Documented rationale
+    ("recorded_at", pa.string()),
+])
+
+# Multi-Dimensional Data Quality Scorecard Schema
+DATA_QUALITY_SCORECARD_SCHEMA = pa.schema([
+    ("source_name", pa.string()),           # 'fastf1', 'kaggle', 'jolpica', 'openf1', 'tum'
+    ("dataset_category", pa.string()),      # 'race_results', 'driver_standings', 'laps', 'geometry', etc.
+    ("records_evaluated", pa.int64()),
+    ("completeness_pct", pa.float64()),     # Non-null required fields
+    ("consistency_pct", pa.float64()),      # Cross-field / relational integrity
+    ("validity_pct", pa.float64()),         # Value range / domain constraint adherence
+    ("reconciliation_coverage_pct", pa.float64()), # Overlap percentage with secondary source
+    ("unresolved_count", pa.int64()),       # Unresolved identities or conflicts
+    ("evaluated_at", pa.string()),
+])
+
+# Provenance and Lineage Audit Schema
+DATA_LINEAGE_SCHEMA = pa.schema([
+    ("canonical_record_id", pa.string()),   # Unique canonical record identifier
+    ("domain", pa.string()),
+    ("canonical_event_id", pa.string()),
+    ("source_api", pa.string()),            # 'fastf1', 'kaggle.rohanrao', 'jolpica.ergast', 'openf1', 'tum'
+    ("source_record_id", pa.string()),      # Raw ID in originating system
+    ("ingestion_timestamp", pa.string()),
+    ("transformation_pipeline", pa.string()),# Pipeline stage applied
+    ("reconciliation_outcome", pa.string()), # 'RECONCILED_EXACT', 'RECONCILED_AUTHORITY', 'STANDALONE'
+    ("selected_source", pa.string()),
+    ("selection_reason", pa.string()),
+    ("pipeline_version", pa.string()),
+])

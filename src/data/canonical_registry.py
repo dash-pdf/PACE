@@ -130,6 +130,40 @@ class CanonicalCircuit:
 
 
 @dataclass(frozen=True)
+class CanonicalCircuitLayout:
+    """Versioned circuit layout definition capturing historical reconfigurations."""
+    layout_id: str                         # Format: '{circuit_id}:{start_year}_{end_year_or_present}'
+    circuit_id: str                        # Canonical circuit ID
+    name: str                              # e.g., 'Yas Marina Pre-2021 Chicane Layout'
+    start_year: int                        # First season of this layout
+    end_year: Optional[int]                # Final season, or None if current/active
+    lap_length_km: float                   # Length in kilometers
+    num_corners: int                       # Corner count
+    tum_compatible: bool                   # True if TUM racetrack database coordinates match this layout
+    notes: str = ""
+
+
+@dataclass(frozen=True)
+class DriverSubstitution:
+    """Historical or modern driver substitution record."""
+    season: int
+    round: int
+    substitute_driver_id: str
+    original_driver_id: str
+    constructor_id: str
+    car_number: int
+    reason: str
+
+
+@dataclass(frozen=True)
+class ConstructorLineage:
+    """Lineage entry mapping a constructor team identity across corporate rebrands."""
+    lineage_id: str                        # e.g., 'sauber_lineage', 'jordan_lineage'
+    current_canonical_id: str              # Modern active ID (or final ID)
+    historical_entries: List[Tuple[int, int, str]] # [(start_year, end_year, canonical_id)]
+
+
+@dataclass(frozen=True)
 class CanonicalEvent:
     """Authoritative Grand Prix event definition linking season, round and circuit."""
     canonical_id: str                      # Format: '{season}_{round:02d}_{circuit_id}'
@@ -184,6 +218,15 @@ class CanonicalEntityRegistry:
         # Event indices
         self._events: Dict[str, CanonicalEvent] = {}
         self._event_by_season_round: Dict[Tuple[int, int], str] = {}
+
+        # Circuit Layout indices
+        self._circuit_layouts: Dict[str, CanonicalCircuitLayout] = {}
+        self._layouts_by_circuit: Dict[str, List[CanonicalCircuitLayout]] = {}
+
+        # Driver substitutions & Constructor lineages
+        self._driver_substitutions: List[DriverSubstitution] = []
+        self._constructor_lineages: Dict[str, ConstructorLineage] = {}
+        self._constructor_to_lineage: Dict[str, str] = {}
 
         # Pre-populate built-in canonical catalog
         self._initialize_canonical_catalog()
@@ -325,6 +368,24 @@ class CanonicalEntityRegistry:
         self._events[event.canonical_id] = event
         self._event_by_season_round[(event.season, event.round)] = event.canonical_id
 
+    def register_circuit_layout(self, layout: CanonicalCircuitLayout) -> None:
+        """Register a versioned circuit layout and index by canonical circuit."""
+        self._circuit_layouts[layout.layout_id] = layout
+        if layout.circuit_id not in self._layouts_by_circuit:
+            self._layouts_by_circuit[layout.circuit_id] = []
+        self._layouts_by_circuit[layout.circuit_id].append(layout)
+
+    def register_driver_substitution(self, sub: DriverSubstitution) -> None:
+        """Register an official driver substitution event."""
+        self._driver_substitutions.append(sub)
+
+    def register_constructor_lineage(self, lineage: ConstructorLineage) -> None:
+        """Register a constructor team rebranding lineage."""
+        self._constructor_lineages[lineage.lineage_id] = lineage
+        for _, _, c_id in lineage.historical_entries:
+            self._constructor_to_lineage[c_id] = lineage.lineage_id
+        self._constructor_to_lineage[lineage.current_canonical_id] = lineage.lineage_id
+
     # -----------------------------------------------------------------------
     # Resolution Methods
     # -----------------------------------------------------------------------
@@ -368,6 +429,22 @@ class CanonicalEntityRegistry:
         norm_q = normalize_key(q_str)
         if norm_q in self._driver_ambiguous_aliases:
             matches = sorted(list(self._driver_ambiguous_aliases[norm_q]))
+            # If season is provided, attempt temporal disambiguation
+            if season is not None:
+                if norm_q == "verstappen":
+                    if season >= 2015 and "max_verstappen" in self._drivers:
+                        return ResolutionResult("max_verstappen", self._drivers["max_verstappen"], True, query, "season_disambiguated", None)
+                    elif season <= 2003 and "jos_verstappen" in self._drivers:
+                        return ResolutionResult("jos_verstappen", self._drivers["jos_verstappen"], True, query, "season_disambiguated", None)
+                elif norm_q == "rosberg":
+                    if season >= 2006 and "nico_rosberg" in self._drivers:
+                        return ResolutionResult("nico_rosberg", self._drivers["nico_rosberg"], True, query, "season_disambiguated", None)
+                    elif season <= 1986 and "keke_rosberg" in self._drivers:
+                        return ResolutionResult("keke_rosberg", self._drivers["keke_rosberg"], True, query, "season_disambiguated", None)
+                elif norm_q == "schumacher":
+                    if season in {2021, 2022} and "mick_schumacher" in self._drivers:
+                        return ResolutionResult("mick_schumacher", self._drivers["mick_schumacher"], True, query, "season_disambiguated", None)
+
             err_msg = f"Ambiguous driver query '{query}' matched multiple drivers: {matches}"
             if strict:
                 raise AmbiguousEntityError("driver", query, matches, err_msg)
@@ -483,9 +560,22 @@ class CanonicalEntityRegistry:
             circ_res = self.resolve_circuit(circuit_id, strict=False)
             if circ_res.is_resolved:
                 target_circuit = circ_res.canonical_id
-                for ev in self._events.values():
-                    if ev.season == season and ev.circuit_id == target_circuit:
-                        return ResolutionResult(ev.canonical_id, ev, True, (season, circuit_id), "season_circuit", None)
+                matches = [ev for ev in self._events.values() if ev.season == season and ev.circuit_id == target_circuit]
+                if len(matches) == 1:
+                    ev = matches[0]
+                    return ResolutionResult(ev.canonical_id, ev, True, (season, circuit_id), "season_circuit", None)
+                elif len(matches) > 1:
+                    # Multi-event circuit distinction (e.g. 2020 Red Bull Ring / Silverstone / Bahrain)
+                    if event_name:
+                        norm_ev = normalize_key(event_name)
+                        filtered = [ev for ev in matches if norm_ev in normalize_key(ev.event_name)]
+                        if len(filtered) == 1:
+                            return ResolutionResult(filtered[0].canonical_id, filtered[0], True, (season, event_name), "event_name", None)
+                    match_ids = [m.canonical_id for m in matches]
+                    err_msg = f"Multiple events hosted at circuit '{circuit_id}' in {season}: {match_ids}. Specify round or official event_name."
+                    if strict:
+                        raise AmbiguousEntityError("event", (season, circuit_id), match_ids, err_msg)
+                    return ResolutionResult(None, None, False, (season, circuit_id), "ambiguous", err_msg)
 
         # 3. Lookup by event title match
         if event_name:
@@ -498,6 +588,55 @@ class CanonicalEntityRegistry:
         if strict:
             raise UnresolvedEntityError("event", (season, round_num, circuit_id), err_msg)
         return ResolutionResult(None, None, False, (season, round_num), "unresolved", err_msg)
+
+    def resolve_circuit_layout(self, circuit_id: str, season: int) -> Optional[CanonicalCircuitLayout]:
+        """Resolve the active layout for a circuit in a given season."""
+        c_res = self.resolve_circuit(circuit_id, strict=False)
+        canon_circ = c_res.canonical_id if c_res.is_resolved else circuit_id
+        layouts = self._layouts_by_circuit.get(canon_circ, [])
+        for l in layouts:
+            if l.start_year <= season and (l.end_year is None or season <= l.end_year):
+                return l
+        return None
+
+    def get_circuit_layouts(self, circuit_id: str) -> List[CanonicalCircuitLayout]:
+        """List all registered historical layouts for a circuit."""
+        c_res = self.resolve_circuit(circuit_id, strict=False)
+        canon_circ = c_res.canonical_id if c_res.is_resolved else circuit_id
+        return list(self._layouts_by_circuit.get(canon_circ, []))
+
+    def get_driver_substitutions(
+        self,
+        season: Optional[int] = None,
+        round_num: Optional[int] = None,
+    ) -> List[DriverSubstitution]:
+        """Retrieve driver substitutions filtered by season/round."""
+        res = self._driver_substitutions
+        if season is not None:
+            res = [s for s in res if s.season == season]
+        if round_num is not None:
+            res = [s for s in res if s.round == round_num]
+        return res
+
+    def get_constructor_lineage(self, constructor_id: str) -> Optional[ConstructorLineage]:
+        """Retrieve the team lineage for a constructor identifier."""
+        c_res = self.resolve_constructor(constructor_id, strict=False)
+        c_id = c_res.canonical_id if c_res.is_resolved else constructor_id
+        lin_id = self._constructor_to_lineage.get(c_id)
+        if lin_id:
+            return self._constructor_lineages.get(lin_id)
+        return None
+
+    def resolve_constructor_for_season(self, lineage_id_or_constructor: str, season: int) -> Optional[str]:
+        """Resolve the specific constructor canonical ID representing a team in a given season."""
+        lineage = self.get_constructor_lineage(lineage_id_or_constructor)
+        if not lineage:
+            c_res = self.resolve_constructor(lineage_id_or_constructor, strict=False)
+            return c_res.canonical_id if c_res.is_resolved else None
+        for s_start, s_end, c_id in lineage.historical_entries:
+            if s_start <= season <= s_end:
+                return c_id
+        return lineage.current_canonical_id
 
     # -----------------------------------------------------------------------
     # Direct Getters
@@ -1705,6 +1844,21 @@ class CanonicalEntityRegistry:
                 s_nums = {5: 2021}
             self.register_driver(d, season_numbers=s_nums)
 
+        # Explicit ambiguity tracking for shared surnames across F1 history
+        shared_surnames = {
+            "schumacher": {"michael_schumacher", "ralf_schumacher", "mick_schumacher"},
+            "hill": {"graham_hill", "damon_hill", "phil_hill"},
+            "fittipaldi": {"emerson_fittipaldi", "christian_fittipaldi", "pietro_fittipaldi", "wilson_fittipaldi"},
+            "piquet": {"nelson_piquet", "piquet_jr"},
+            "verstappen": {"max_verstappen", "jos_verstappen"},
+            "rosberg": {"keke_rosberg", "nico_rosberg"},
+        }
+        for surname, candidates in shared_surnames.items():
+            norm_s = normalize_key(surname)
+            self._driver_ambiguous_aliases[norm_s] = set(candidates)
+            if norm_s in self._driver_by_alias:
+                del self._driver_by_alias[norm_s]
+
         # ===================================================================
         # 4. 2026 CALENDAR EVENTS (including Las Vegas Round 21)
         # ===================================================================
@@ -1749,6 +1903,79 @@ class CanonicalEntityRegistry:
                     "qualifying": f"{canon_event_id}_qualifying",
                     "race": f"{canon_event_id}_race",
                 },
+            )
+            self.register_event(ev)
+
+        # ===================================================================
+        # 5. HISTORICAL CIRCUIT LAYOUTS (Versioned Reconfigurations)
+        # ===================================================================
+        layouts_data = [
+            CanonicalCircuitLayout("yas_marina:2009_2020", "yas_marina", "Yas Marina Pre-2021 Chicane Layout", 2009, 2020, 5.547, 21, True, "Features north chicane & Marina hairpin"),
+            CanonicalCircuitLayout("yas_marina:2021_present", "yas_marina", "Yas Marina Modern Reprofiled Layout", 2021, None, 5.281, 16, False, "Fast north hairpin and reprofiled banked south turn"),
+            CanonicalCircuitLayout("zandvoort:1990_2019", "zandvoort", "Zandvoort Pre-2020 Flat Layout", 1990, 2019, 4.316, 14, True, "Flat turns prior to modern banking"),
+            CanonicalCircuitLayout("zandvoort:2020_present", "zandvoort", "Zandvoort Modern Banked Layout", 2020, None, 4.259, 14, False, "Banked Hugenholtz (18 deg) and Arie Luyendyk (18 deg)"),
+            CanonicalCircuitLayout("albert_park:1996_2021", "albert_park", "Albert Park 1996-2021 Layout", 1996, 2021, 5.303, 16, True, "Features chicane at Turns 9 and 10"),
+            CanonicalCircuitLayout("albert_park:2022_present", "albert_park", "Albert Park Modern High-Speed Layout", 2022, None, 5.278, 14, False, "Turns 9-10 chicane removed for sweeping curve"),
+            CanonicalCircuitLayout("catalunya:2007_2022", "catalunya", "Circuit de Barcelona-Catalunya Chicane Layout", 2007, 2022, 4.675, 16, True, "Features slow chicane at Turns 14-15"),
+            CanonicalCircuitLayout("catalunya:2023_present", "catalunya", "Circuit de Barcelona-Catalunya Modern Layout", 2023, None, 4.657, 14, False, "Final chicane removed for fast double-right"),
+            CanonicalCircuitLayout("silverstone:2010_present", "silverstone", "Silverstone Modern Arena Layout", 2010, None, 5.891, 18, True, "Arena infield complex"),
+            CanonicalCircuitLayout("spa:1979_present", "spa", "Spa-Francorchamps Modern Grand Prix Layout", 1979, None, 7.004, 19, True, "Modern GP track"),
+            CanonicalCircuitLayout("monza:2000_present", "monza", "Autodromo Nazionale Monza Modern Layout", 2000, None, 5.793, 11, True, "Modern Variante del Rettifilo"),
+            CanonicalCircuitLayout("red_bull_ring:1997_present", "red_bull_ring", "Red Bull Ring Modern Layout", 1997, None, 4.318, 10, True, "Modern A1-Ring / Red Bull Ring layout"),
+            CanonicalCircuitLayout("vegas:2023_present", "vegas", "Las Vegas Strip Street Circuit", 2023, None, 6.201, 17, False, "Koval Lane / Las Vegas Boulevard circuit"),
+        ]
+        for l in layouts_data:
+            self.register_circuit_layout(l)
+
+        # ===================================================================
+        # 6. DRIVER SUBSTITUTIONS (Mid-Season Replacements & Reserve Drives)
+        # ===================================================================
+        substitutions_data = [
+            DriverSubstitution(2024, 2, "bearman", "sainz", "ferrari", 38, "Appendicitis surgery"),
+            DriverSubstitution(2024, 16, "colapinto", "sargeant", "williams", 43, "Mid-season performance replacement"),
+            DriverSubstitution(2024, 17, "bearman", "kevin_magnussen", "haas", 50, "FIA 12 penalty points race ban"),
+            DriverSubstitution(2024, 19, "lawson", "ricciardo", "rb", 30, "Mid-season seat reassignment"),
+            DriverSubstitution(2024, 21, "bearman", "kevin_magnussen", "haas", 50, "Driver illness (Friday-Sunday)"),
+            DriverSubstitution(2022, 16, "de_vries", "albon", "williams", 45, "Appendicitis surgery"),
+            DriverSubstitution(2023, 13, "lawson", "ricciardo", "alphatauri", 40, "Hand fracture in FP2"),
+        ]
+        for sub in substitutions_data:
+            self.register_driver_substitution(sub)
+
+        # ===================================================================
+        # 7. CONSTRUCTOR CORPORATE LINEAGES (Team Rebrandings)
+        # ===================================================================
+        lineages_data = [
+            ConstructorLineage("sauber_lineage", "sauber", [(1993, 2005, "sauber"), (2006, 2009, "bmw_sauber"), (2010, 2018, "sauber"), (2019, 2023, "alfa_romeo"), (2024, 2025, "sauber"), (2026, 2030, "audi")]),
+            ConstructorLineage("jordan_lineage", "aston_martin", [(1991, 2005, "jordan"), (2006, 2006, "midland"), (2007, 2007, "spyker"), (2008, 2018, "force_india"), (2019, 2020, "racing_point"), (2021, 2030, "aston_martin")]),
+            ConstructorLineage("stewart_lineage", "red_bull", [(1997, 1999, "stewart"), (2000, 2004, "jaguar"), (2005, 2030, "red_bull")]),
+            ConstructorLineage("minardi_lineage", "rb", [(1985, 2005, "minardi"), (2006, 2019, "toro_rosso"), (2020, 2023, "alphatauri"), (2024, 2030, "rb")]),
+            ConstructorLineage("toleman_lineage", "alpine", [(1981, 1985, "toleman"), (1986, 2001, "benetton"), (2002, 2011, "renault"), (2012, 2015, "lotus_f1"), (2016, 2020, "renault"), (2021, 2030, "alpine")]),
+            ConstructorLineage("tyrrell_lineage", "mercedes", [(1970, 1998, "tyrrell"), (1999, 2005, "bar"), (2006, 2008, "honda"), (2009, 2009, "brawn"), (2010, 2030, "mercedes")]),
+        ]
+        for lin in lineages_data:
+            self.register_constructor_lineage(lin)
+
+        # ===================================================================
+        # 8. HISTORICAL MULTI-EVENTS ON SAME CIRCUIT IN SINGLE SEASON
+        # ===================================================================
+        multi_events_2020 = [
+            (1, "Austrian Grand Prix", "red_bull_ring", "Austria"),
+            (2, "Styrian Grand Prix", "red_bull_ring", "Austria"),
+            (4, "British Grand Prix", "silverstone", "UK"),
+            (5, "70th Anniversary Grand Prix", "silverstone", "UK"),
+            (15, "Bahrain Grand Prix", "bahrain", "Bahrain"),
+            (16, "Sakhir Grand Prix", "bahrain", "Bahrain"),
+        ]
+        for rnd, name, c_id, country in multi_events_2020:
+            canon_ev_id = f"2020_{rnd:02d}_{c_id}"
+            ev = CanonicalEvent(
+                canonical_id=canon_ev_id,
+                season=2020,
+                round=rnd,
+                event_name=name,
+                circuit_id=c_id,
+                country=country,
             )
             self.register_event(ev)
 
@@ -1826,3 +2053,31 @@ def get_canonical_circuit_id(query: str) -> str:
     """Return strictly resolved canonical circuit ID or raise UnresolvedEntityError."""
     res = resolve_circuit(query, strict=True)
     return str(res.canonical_id)
+
+
+def resolve_circuit_layout(circuit_id: str, season: int) -> Optional[CanonicalCircuitLayout]:
+    """Resolve active circuit layout for given season."""
+    return get_canonical_registry().resolve_circuit_layout(circuit_id, season)
+
+
+def get_circuit_layouts(circuit_id: str) -> List[CanonicalCircuitLayout]:
+    """List historical layouts for a circuit."""
+    return get_canonical_registry().get_circuit_layouts(circuit_id)
+
+
+def get_driver_substitutions(
+    season: Optional[int] = None,
+    round_num: Optional[int] = None,
+) -> List[DriverSubstitution]:
+    """Retrieve driver substitutions."""
+    return get_canonical_registry().get_driver_substitutions(season=season, round_num=round_num)
+
+
+def get_constructor_lineage(constructor_id: str) -> Optional[ConstructorLineage]:
+    """Retrieve team rebrand lineage for a constructor."""
+    return get_canonical_registry().get_constructor_lineage(constructor_id)
+
+
+def resolve_constructor_for_season(lineage_id_or_constructor: str, season: int) -> Optional[str]:
+    """Resolve specific constructor canonical ID for a team in a given season."""
+    return get_canonical_registry().resolve_constructor_for_season(lineage_id_or_constructor, season)

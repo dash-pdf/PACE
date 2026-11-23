@@ -33,6 +33,11 @@ from src.data.schemas import (
     TUM_RACELINE_SCHEMA,
     TUM_CIRCUIT_SUMMARY_SCHEMA,
     TUM_CORNER_PROFILE_SCHEMA,
+    UNIFIED_EVENTS_SCHEMA,
+    UNIFIED_SESSIONS_SCHEMA,
+    CROSS_SOURCE_RECONCILIATION_SCHEMA,
+    DATA_QUALITY_SCORECARD_SCHEMA,
+    DATA_LINEAGE_SCHEMA,
 )
 from src.data.fastf1_collector import FastF1Collector, parse_time_to_ms, classify_status, extract_df
 from src.data.driver_circuit import DriverCircuitIntelligence, get_regulation_era, CIRCUIT_METRICS
@@ -167,6 +172,44 @@ from src.features.circuit_geometry import (
     StraightSegment,
     CurvatureSpectrum,
 )
+from src.data.canonical_registry import (
+    CanonicalCircuitLayout,
+    DriverSubstitution,
+    ConstructorLineage,
+    resolve_circuit_layout,
+    get_circuit_layouts,
+    get_driver_substitutions,
+    get_constructor_lineage,
+    resolve_constructor_for_season,
+)
+from src.data.unified_contracts import (
+    SessionType,
+    SessionStatus,
+    MissingValueSemantics,
+    DiscrepancyType,
+    UnifiedEvent,
+    UnifiedSession,
+    DiscrepancyRecord,
+    QualityScorecard,
+    DataLineageRecord,
+    DataContractMetadata,
+    DATA_CONTRACTS_CATALOG,
+    get_data_contract,
+    list_data_contracts,
+    parse_iso_utc,
+)
+from src.data.source_authority import (
+    SourceDomain,
+    FieldAuthorityRule,
+    SourceAuthorityMatrix,
+)
+from src.data.data_lineage import DataLineageTracker
+from src.data.cross_source_reconciler import (
+    CrossSourceReconciler,
+    CrossSourceReconciliationReport,
+    DomainReconciliationSummary,
+)
+from src.data.quality_framework import DataQualityEvaluator
 
 __all__ = [
     "DRIVERS_SCHEMA",
@@ -313,4 +356,39 @@ __all__ = [
     "CornerProfile",
     "StraightSegment",
     "CurvatureSpectrum",
+    "UNIFIED_EVENTS_SCHEMA",
+    "UNIFIED_SESSIONS_SCHEMA",
+    "CROSS_SOURCE_RECONCILIATION_SCHEMA",
+    "DATA_QUALITY_SCORECARD_SCHEMA",
+    "DATA_LINEAGE_SCHEMA",
+    "CanonicalCircuitLayout",
+    "DriverSubstitution",
+    "ConstructorLineage",
+    "resolve_circuit_layout",
+    "get_circuit_layouts",
+    "get_driver_substitutions",
+    "get_constructor_lineage",
+    "resolve_constructor_for_season",
+    "SessionType",
+    "SessionStatus",
+    "MissingValueSemantics",
+    "DiscrepancyType",
+    "UnifiedEvent",
+    "UnifiedSession",
+    "DiscrepancyRecord",
+    "QualityScorecard",
+    "DataLineageRecord",
+    "DataContractMetadata",
+    "DATA_CONTRACTS_CATALOG",
+    "get_data_contract",
+    "list_data_contracts",
+    "parse_iso_utc",
+    "SourceDomain",
+    "FieldAuthorityRule",
+    "SourceAuthorityMatrix",
+    "DataLineageTracker",
+    "CrossSourceReconciler",
+    "CrossSourceReconciliationReport",
+    "DomainReconciliationSummary",
+    "DataQualityEvaluator",
 ]
