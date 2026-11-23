@@ -28,11 +28,14 @@ def ensure_directories(base_dir: Optional[Path] = None) -> None:
         "raw",
         "raw/jolpica/cache",
         "raw/openf1/cache",
+        "raw/tum",
+        "raw/tum/repo",
         "processed",
         "historical",
         "historical/driver_circuit",
         "historical/jolpica",
         "historical/openf1",
+        "historical/tum",
     ]:
         d = base / "data" / sub
         d.mkdir(parents=True, exist_ok=True)
@@ -78,6 +81,27 @@ def get_openf1_cache_dir(base_dir: Optional[Path] = None) -> Path:
     p = base / "data" / "raw" / "openf1" / "cache"
     p.mkdir(parents=True, exist_ok=True)
     return p
+
+
+def get_tum_raw_dir(base_dir: Optional[Path] = None) -> Path:
+    """Return local directory containing raw TUM racetrack-database repository."""
+    base = base_dir or DEFAULT_BASE_DIR
+    p = base / "data" / "raw" / "tum" / "repo"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def get_tum_dir(base_dir: Optional[Path] = None) -> Path:
+    """Return destination path for normalized TUM historical datasets."""
+    base = base_dir or DEFAULT_BASE_DIR
+    p = base / "data" / "historical" / "tum"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def get_tum_path(filename: str, base_dir: Optional[Path] = None) -> Path:
+    """Return destination file path within TUM historical directory."""
+    return get_tum_dir(base_dir=base_dir) / filename
 
 
 def get_driver_circuit_dir(base_dir: Optional[Path] = None) -> Path:

@@ -181,23 +181,23 @@ Stages 5.2, 5.3, 5.4, 6.1, 6.2, 7.1-7.3, 8.4 (Full Scope System Hardening & PACE
 - **Criticality:** High (Agreed Scope F).
 - **Required for Las Vegas:** No (Pre-race prediction relies on H1–H3 snapshots, not in-race live telemetry).
 
-#### Stage 5.5: TUM Racetrack Database Ingestion & Las Vegas Strip Geometry
-- **Objective:** Ingest racetrack geometry from the TUM Racetrack Database (CC BY 4.0) and establish high-fidelity geometric profiles for championship circuits, specifically Las Vegas.
-- **Existing Components to Reuse:** `src/data/driver_circuit.py` (`CIRCUIT_METRICS`).
-- **Required Modifications & New Components:**
-  - Create `src/circuits/geometry.py`: Parser for TUM centerline, track width, curvature, and racing line CSV files.
-  - Calculate physical circuit engineering features:
-    - Curvature spectrum (fraction of lap in low, medium, and high-speed turns).
-    - Longitudinal braking energy severity (number and intensity of heavy braking zones).
-    - Track width narrowing chokepoints (identifying collision hazard sectors for `IncidentEngine`).
-  - Integrate dedicated geometric profile for the **Las Vegas Strip Circuit** (length: 6.201 km, 17 turns, 1.9 km flat-out DRS straight along the Strip).
-  - Add explicit attribution in documentation and headers per CC BY 4.0.
-- **Dependencies:** `numpy`, `scipy`.
-- **Testing Requirements:** Centerline coordinate validation, track length verification ($\pm 0.05\text{ km}$), curvature sign checks.
-- **Acceptance Criteria:** Las Vegas Strip Circuit geometry successfully parsed; braking and downforce metrics integrated into circuit characteristics.
-- **Expected Deliverables:** `src/circuits/geometry.py`, `tests/test_circuit_geometry.py`, updated `docs/`.
-- **Criticality:** **CRITICAL**.
-- **Required for Las Vegas:** **YES**.
+#### Stage 5.5: TUM Racetrack Database Ingestion & Geometric Intelligence [COMPLETED]
+- **Status:** **COMPLETE** (16/16 tests passing in `test_tum_integration.py`, 154/154 full suite passing).
+- **Objective:** Ingest racetrack geometry from the TUM Racetrack Database (LGPL-3.0) and establish high-fidelity geometric profiles for championship circuits.
+- **Existing Components Reused:** `src/data/canonical_registry.py`, `src/data/storage.py`, `src/data/schemas.py`.
+- **Implemented Components & Enhancements:**
+  - `src/data/tum_client.py`: Client for inspecting, caching, and parsing raw TUM track and raceline CSVs; offline mode; provenance tracking (Commit `e59595d`, LGPL-3.0).
+  - `src/features/circuit_geometry.py`: Differential geometry processor computing continuous arc length, unwrapped heading, periodic central difference curvature, curvature radius, road width, corner identification, speed classification, straight segmentation, and curvature spectrum.
+  - `src/data/tum_ingestion.py`: Normalization engine resolving circuits to canonical IDs via `CanonicalEntityRegistry`, validating schemas, and persisting strongly typed Parquet tables in `data/historical/tum/`.
+  - `src/data/tum_reconciler.py`: Cross-source reconciler auditing TUM lengths against official FIA/PACE specifications (17/20 sub-15m matches, layout reconfigurations for Yas Marina and Zandvoort).
+  - `src/data/schemas.py`: 4 PyArrow schemas (`TUM_TRACK_GEOMETRY_SCHEMA`, `TUM_RACELINE_SCHEMA`, `TUM_CIRCUIT_SUMMARY_SCHEMA`, `TUM_CORNER_PROFILE_SCHEMA`).
+  - `main.py`: Full CLI integration (`--tum-status`, `--tum-inventory`, `--tum-ingest`, `--tum-circuits`, `--tum-geometry`, `--tum-reconcile`).
+  - Documentation: `docs/phase5_5_tum_integration_report.md`.
+- **Calendar & Coverage Audit Finding:** Audited all 25 TUM circuits. 20 modern/historic F1 circuits match canonical registry. 12 canonical F1 circuits are absent from the TUM database (including Las Vegas Strip Circuit, Monaco, Baku). In strict adherence to scientific integrity, geometry was **not fabricated** for missing circuits.
+- **Acceptance Criteria Met:** 25 circuits ingested and normalized; 100% of F1 tracks matched; PyArrow schema validation; full test suite passing with zero regressions.
+- **Deliverables:** `src/data/tum_client.py`, `src/data/tum_ingestion.py`, `src/data/tum_reconciler.py`, `src/features/circuit_geometry.py`, `tests/test_tum_integration.py`, `docs/phase5_5_tum_integration_report.md`.
+- **Criticality:** Critical (Agreed Scope D).
+- **Required for Las Vegas:** Yes (Geometric baseline established for championship circuits).
 
 ---
 

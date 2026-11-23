@@ -29,6 +29,10 @@ from src.data.schemas import (
     OPENF1_PIT_SCHEMA,
     OPENF1_CAR_DATA_SCHEMA,
     OPENF1_LOCATION_SCHEMA,
+    TUM_TRACK_GEOMETRY_SCHEMA,
+    TUM_RACELINE_SCHEMA,
+    TUM_CIRCUIT_SUMMARY_SCHEMA,
+    TUM_CORNER_PROFILE_SCHEMA,
 )
 from src.data.fastf1_collector import FastF1Collector, parse_time_to_ms, classify_status, extract_df
 from src.data.driver_circuit import DriverCircuitIntelligence, get_regulation_era, CIRCUIT_METRICS
@@ -45,6 +49,9 @@ from src.data.storage import (
     get_openf1_dir,
     get_openf1_path,
     get_openf1_cache_dir,
+    get_tum_raw_dir,
+    get_tum_dir,
+    get_tum_path,
 )
 from src.data.validation import (
     ValidationReport,
@@ -137,6 +144,28 @@ from src.data.openf1_reconciler import (
     OpenF1Reconciler,
     OpenF1ReconciliationReport,
     OpenF1Discrepancy,
+)
+from src.data.tum_client import (
+    TUMClient,
+    TUMClientConfig,
+    TUMMetadata,
+    TUMRawTrackInfo,
+    TUMError,
+    TUMRepositoryNotFoundError,
+    TUMTrackNotFoundError,
+)
+from src.data.tum_ingestion import TUMIngestionEngine
+from src.data.tum_reconciler import (
+    TUMReconciler,
+    TUMReconciliationReport,
+    CircuitComparisonResult,
+)
+from src.features.circuit_geometry import (
+    CircuitGeometryProcessor,
+    CircuitGeometryAnalysis,
+    CornerProfile,
+    StraightSegment,
+    CurvatureSpectrum,
 )
 
 __all__ = [
@@ -261,4 +290,27 @@ __all__ = [
     "OpenF1Reconciler",
     "OpenF1ReconciliationReport",
     "OpenF1Discrepancy",
+    "TUM_TRACK_GEOMETRY_SCHEMA",
+    "TUM_RACELINE_SCHEMA",
+    "TUM_CIRCUIT_SUMMARY_SCHEMA",
+    "TUM_CORNER_PROFILE_SCHEMA",
+    "get_tum_raw_dir",
+    "get_tum_dir",
+    "get_tum_path",
+    "TUMClient",
+    "TUMClientConfig",
+    "TUMMetadata",
+    "TUMRawTrackInfo",
+    "TUMError",
+    "TUMRepositoryNotFoundError",
+    "TUMTrackNotFoundError",
+    "TUMIngestionEngine",
+    "TUMReconciler",
+    "TUMReconciliationReport",
+    "CircuitComparisonResult",
+    "CircuitGeometryProcessor",
+    "CircuitGeometryAnalysis",
+    "CornerProfile",
+    "StraightSegment",
+    "CurvatureSpectrum",
 ]

@@ -506,3 +506,81 @@ OPENF1_LOCATION_SCHEMA = pa.schema([
     ("source_api", pa.string()),
     ("retrieved_at", pa.string()),
 ])
+
+# ---------------------------------------------------------------------------
+# TUM Racetrack Database Schemas
+# ---------------------------------------------------------------------------
+
+# Normalized Track Centerline, Boundaries and Derived Geometry
+TUM_TRACK_GEOMETRY_SCHEMA = pa.schema([
+    ("circuit_id", pa.string()),            # Canonical circuit ID (e.g. 'monza', 'americas')
+    ("tum_circuit_name", pa.string()),      # Original TUM filename stem (e.g. 'Monza', 'Austin')
+    ("point_index", pa.int32()),            # Continuous sequence 0, 1, ... N-1
+    ("s_m", pa.float64()),                  # Derived cumulative centerline distance (meters)
+    ("x_m", pa.float64()),                  # Source 2D Cartesian x coordinate (meters)
+    ("y_m", pa.float64()),                  # Source 2D Cartesian y coordinate (meters)
+    ("w_tr_right_m", pa.float64()),         # Source track width right of centerline (meters)
+    ("w_tr_left_m", pa.float64()),          # Source track width left of centerline (meters)
+    ("w_total_m", pa.float64()),            # Derived total track width (meters)
+    ("psi_rad", pa.float64()),              # Derived heading angle (radians)
+    ("kappa_radpm", pa.float64()),          # Derived curvature (rad/m)
+    ("radius_m", pa.float64()),             # Derived curvature radius = 1/|kappa| (meters)
+    ("source_api", pa.string()),            # 'tum'
+    ("retrieved_at", pa.string()),
+])
+
+# Minimum Curvature Raceline
+TUM_RACELINE_SCHEMA = pa.schema([
+    ("circuit_id", pa.string()),            # Canonical circuit ID
+    ("tum_circuit_name", pa.string()),
+    ("point_index", pa.int32()),
+    ("s_m", pa.float64()),                  # Derived cumulative raceline distance (meters)
+    ("x_m", pa.float64()),                  # Source 2D Cartesian x coordinate (meters)
+    ("y_m", pa.float64()),                  # Source 2D Cartesian y coordinate (meters)
+    ("source_api", pa.string()),
+    ("retrieved_at", pa.string()),
+])
+
+# Overall Circuit Geometry and Classification Summary
+TUM_CIRCUIT_SUMMARY_SCHEMA = pa.schema([
+    ("circuit_id", pa.string()),            # Canonical circuit ID (or TUM name if unmapped)
+    ("tum_circuit_name", pa.string()),      # Raw TUM identifier
+    ("is_canonical_f1", pa.bool_()),        # Whether circuit maps to canonical F1 championship calendar
+    ("num_centerline_points", pa.int32()),
+    ("num_raceline_points", pa.int32()),
+    ("track_length_m", pa.float64()),       # Derived closed centerline length (meters)
+    ("raceline_length_m", pa.float64()),    # Derived closed raceline length (meters)
+    ("closure_error_m", pa.float64()),      # Euclidean gap from final point to initial point (meters)
+    ("min_width_m", pa.float64()),          # Minimum track width (meters)
+    ("max_width_m", pa.float64()),          # Maximum track width (meters)
+    ("mean_width_m", pa.float64()),         # Mean track width (meters)
+    ("num_corners_detected", pa.int32()),   # Inferred corner count
+    ("num_low_speed_corners", pa.int32()),  # Inferred (R_apex < 75m)
+    ("num_medium_speed_corners", pa.int32()), # Inferred (75m <= R_apex <= 150m)
+    ("num_high_speed_corners", pa.int32()), # Inferred (R_apex > 150m)
+    ("longest_straight_m", pa.float64()),   # Inferred longest straight segment (meters)
+    ("low_speed_pct", pa.float64()),        # Inferred percentage of lap in low speed corners
+    ("medium_speed_pct", pa.float64()),     # Inferred percentage of lap in medium speed corners
+    ("high_speed_pct", pa.float64()),       # Inferred percentage of lap in high speed corners
+    ("straight_pct", pa.float64()),         # Inferred percentage of lap in straights
+    ("source_commit", pa.string()),         # Source git commit hash
+    ("source_license", pa.string()),        # 'LGPL-3.0'
+    ("retrieved_at", pa.string()),
+])
+
+# Inferred Corner Profiles
+TUM_CORNER_PROFILE_SCHEMA = pa.schema([
+    ("circuit_id", pa.string()),
+    ("corner_number", pa.int32()),          # 1, 2, ...
+    ("turn_direction", pa.string()),        # 'left', 'right'
+    ("speed_category", pa.string()),        # 'low', 'medium', 'high'
+    ("start_s_m", pa.float64()),
+    ("apex_s_m", pa.float64()),
+    ("end_s_m", pa.float64()),
+    ("corner_length_m", pa.float64()),
+    ("apex_radius_m", pa.float64()),
+    ("apex_curvature_radpm", pa.float64()),
+    ("min_track_width_m", pa.float64()),
+    ("source_api", pa.string()),
+    ("retrieved_at", pa.string()),
+])

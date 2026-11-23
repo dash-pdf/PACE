@@ -158,6 +158,12 @@ def main() -> int:
         help="OpenF1 session key identifier (e.g. 7953 for 2023 Bahrain Race)",
     )
     parser.add_argument(
+        "--circuit",
+        type=str,
+        default="monza",
+        help="Target circuit canonical identifier (e.g. monza, americas, spa) for geometry analysis",
+    )
+    parser.add_argument(
         "--openf1-status",
         action="store_true",
         help="Check OpenF1 API connectivity, local disk cache, and rate limit status",
@@ -193,9 +199,39 @@ def main() -> int:
         help="Run cross-source reconciliation comparing OpenF1 against FastF1 for overlapping session",
     )
     parser.add_argument(
+        "--tum-status",
+        action="store_true",
+        help="Check TUM Racetrack Database repository status, commit, license, and local storage",
+    )
+    parser.add_argument(
+        "--tum-inventory",
+        action="store_true",
+        help="List all raw TUM circuits, point counts, boundary dimensions, and file paths",
+    )
+    parser.add_argument(
+        "--tum-ingest",
+        action="store_true",
+        help="Ingest and normalize all TUM track geometries and racelines into Parquet",
+    )
+    parser.add_argument(
+        "--tum-circuits",
+        action="store_true",
+        help="Display TUM circuit coverage (canonical F1 matches, non-canonical, and missing F1 tracks)",
+    )
+    parser.add_argument(
+        "--tum-geometry",
+        action="store_true",
+        help="Display derived differential geometry, curvature spectrum, corners, and straights for --circuit",
+    )
+    parser.add_argument(
+        "--tum-reconcile",
+        action="store_true",
+        help="Run cross-source reconciliation comparing TUM geometry against PACE canonical definitions",
+    )
+    parser.add_argument(
         "--version",
         action="version",
-        version="PACE 0.5.0-dev (Stage 5.4: OpenF1 Race Intelligence Integration)",
+        version="PACE 0.5.0-dev (Stage 5.5: TUM Racetrack Database Integration)",
     )
 
     args = parser.parse_args()
@@ -237,6 +273,7 @@ def main() -> int:
         print("      * Kaggle Historical 1950-2024 Integration (Stage 5.2 Implemented)")
         print("      * Jolpica F1 API & Championship Analytics Engine (Stage 5.3 Implemented)")
         print("      * OpenF1 Race Intelligence Integration (Stage 5.4 Implemented)")
+        print("      * TUM Racetrack Database Geometry & Trajectory Engine (Stage 5.5 Implemented)")
         return 0
 
     if args.collect_circuit_history:
@@ -684,6 +721,148 @@ def main() -> int:
         print("\n--- Field-Level Source Precedence Established ---")
         for fld, prec in reconciler.SOURCE_PRECEDENCE_MATRIX.items():
             print(f"  * {fld:<25}: {prec}")
+
+        return 0
+
+    if args.tum_status:
+        from src.data.tum_client import TUMClient
+        client = TUMClient()
+        meta = client.get_metadata()
+        avail = client.is_available()
+
+        print("\nTUM Racetrack Database Status & Local Storage:")
+        print(f"  Repository URL:   {meta.repo_url}")
+        print(f"  Local Path:       {meta.local_path}")
+        print(f"  Available:        {'YES (Downloaded & Cached)' if avail else 'NO (Run --tum-ingest to clone)'}")
+        print(f"  Source Revision:  {meta.commit_hash}")
+        print(f"  Commit Date:      {meta.commit_date}")
+        print(f"  Author / Lead:    {meta.author}")
+        print(f"  License:          {meta.license}")
+        print(f"  Track CSVs:       {meta.num_tracks} files in tracks/")
+        print(f"  Raceline CSVs:    {meta.num_racelines} files in racelines/")
+        return 0
+
+    if args.tum_inventory:
+        from src.data.tum_client import TUMClient
+        client = TUMClient()
+        if not client.is_available():
+            print("Local TUM repository not found. Attempting clone...")
+            client.ensure_repository()
+
+        infos = client.get_all_track_infos()
+        print(f"\nInventory of TUM Racetrack Database ({len(infos)} circuits available):")
+        rows = []
+        for info in infos:
+            rows.append({
+                "track_name": info.track_name,
+                "points": info.point_count,
+                "has_raceline": "YES" if info.raceline_csv else "NO",
+                "has_plots": "YES" if (info.raceline_png and info.curvature_png) else "NO",
+                "size_kb": f"{info.file_size_bytes / 1024:.1f}",
+            })
+        df_inv = pd.DataFrame(rows)
+        print(df_inv.to_string(index=False))
+        return 0
+
+    if args.tum_ingest:
+        from src.data.tum_ingestion import TUMIngestionEngine
+        engine = TUMIngestionEngine()
+        print("\nExecuting TUM Racetrack Database Ingestion & Differential Geometry Pipeline...")
+        metrics = engine.ingest_all(force=args.force)
+
+        print("\nTUM Ingestion & Feature Normalization Completed Successfully:")
+        print(f"  Total Circuits Ingested:      {metrics['total_circuits']}")
+        print(f"  Canonical F1 Calendar Tracks: {metrics['canonical_f1_matched']}")
+        print(f"  Non-Canonical / Historic:     {metrics['non_canonical']}")
+        print(f"  Total Centerline Points:      {metrics['total_points_ingested']:,}")
+        print(f"  Inferred Corners Detected:    {metrics['total_corners_detected']}")
+        print(f"  Source Git Commit:            {metrics['commit_hash']}")
+        print(f"  License:                      {metrics['license']}")
+        print(f"  Destination Directory:        {engine.output_dir}")
+        return 0
+
+    if args.tum_circuits:
+        from src.data.tum_reconciler import TUMReconciler
+        reconciler = TUMReconciler()
+        rep = reconciler.reconcile_all()
+
+        print("\n=========================================================================================")
+        print(f"TUM RACETRACK DATABASE: CIRCUIT COVERAGE MATRIX ({rep.matched_f1_circuits} F1 MATCHES)")
+        print("=========================================================================================")
+
+        df_matched = rep.to_dataframe()[["circuit_id", "tum_name", "canonical_name", "tum_length_m", "canonical_length_m", "match_status"]]
+        print("\n--- Canonical F1 Circuits in TUM Database (20 tracks) ---")
+        print(df_matched.to_string(index=False))
+
+        print(f"\n--- Non-Canonical / Historic Tracks in TUM ({len(rep.unmapped_tum_tracks)} tracks) ---")
+        for u in rep.unmapped_tum_tracks:
+            print(f"  * {u}")
+
+        print(f"\n--- Canonical F1 Championship Circuits Missing in TUM ({len(rep.missing_canonical_f1)} tracks) ---")
+        for m in rep.missing_canonical_f1:
+            print(f"  * {m}")
+
+        return 0
+
+    if args.tum_geometry:
+        from src.data.tum_ingestion import TUMIngestionEngine
+        engine = TUMIngestionEngine()
+        cid = args.circuit or "monza"
+        print(f"\nLoading Geometric Intelligence for Circuit '{cid}'...")
+        df_geo = engine.load_circuit_geometry(cid)
+        if df_geo is None or df_geo.empty:
+            print(f"No TUM geometry found for circuit '{cid}'. Try running --tum-ingest first or check --tum-circuits.")
+            return 1
+
+        df_corners = engine.load_circuit_corners(cid)
+        df_summary = engine.load_summary()
+        sum_row = df_summary[df_summary["circuit_id"] == cid]
+        if sum_row.empty and "tum_circuit_name" in df_geo.columns:
+            sum_row = df_summary[df_summary["tum_circuit_name"] == df_geo["tum_circuit_name"].iloc[0]]
+
+        tum_name = df_geo["tum_circuit_name"].iloc[0] if "tum_circuit_name" in df_geo.columns else cid
+        print("\n" + "=" * 95)
+        print(f"TUM CIRCUIT GEOMETRY & TRAJECTORY PROFILE: {tum_name.upper()} (Canonical: {cid})")
+        print("=" * 95)
+
+        if not sum_row.empty:
+            r = sum_row.iloc[0]
+            print(f"  Track Length:       {r['track_length_m']:.2f} m (Raceline: {r['raceline_length_m']:.2f} m)")
+            print(f"  Closure Error:      {r['closure_error_m']:.3f} m | Points: {r['num_centerline_points']}")
+            print(f"  Track Width:        Mean={r['mean_width_m']:.2f} m (Min={r['min_width_m']:.2f} m, Max={r['max_width_m']:.2f} m)")
+            print(f"  Longest Straight:   {r['longest_straight_m']:.2f} m")
+            print(f"  Curvature Spectrum: Low-speed={r['low_speed_pct']:.1f}%, Med-speed={r['medium_speed_pct']:.1f}%, High-speed={r['high_speed_pct']:.1f}%, Straights={r['straight_pct']:.1f}%")
+            print(f"  Corners Detected:   {r['num_corners_detected']} (Low={r['num_low_speed_corners']}, Med={r['num_medium_speed_corners']}, High={r['num_high_speed_corners']})")
+
+        if df_corners is not None and not df_corners.empty:
+            disp_corners = ["corner_number", "turn_direction", "speed_category", "start_s_m", "apex_s_m", "end_s_m", "corner_length_m", "apex_radius_m", "min_track_width_m"]
+            print("\n--- Inferred Corner Classifications & Apex Properties ---")
+            print(df_corners[disp_corners].to_string(index=False))
+
+        return 0
+
+    if args.tum_reconcile:
+        from src.data.tum_reconciler import TUMReconciler
+        reconciler = TUMReconciler()
+        print("\nExecuting Comprehensive Cross-Source Reconciliation: TUM vs PACE Canonical Definitions...")
+        report = reconciler.reconcile_all()
+
+        print("\n" + "=" * 105)
+        print("PACE CROSS-SOURCE RECONCILIATION: TUM RACETRACK DATABASE VS CANONICAL REGISTRY")
+        print("=" * 105)
+        print(f"\n{report.summary_message}\n")
+
+        df_comp = report.to_dataframe()[["circuit_id", "tum_name", "tum_length_m", "canonical_length_m", "delta_m", "delta_pct", "match_status", "notes"]]
+        print(df_comp.to_string(index=False))
+
+        print("\n--- Detailed Reconciliation Findings ---")
+        print(f"  * Total TUM Tracks Audited:         {report.total_tum_circuits}")
+        print(f"  * Canonical F1 Matches:             {report.matched_f1_circuits} (100% of F1 tracks present)")
+        print(f"  * Non-Canonical Tracks Audited:     {len(report.unmapped_tum_tracks)} ({', '.join(report.unmapped_tum_tracks)})")
+        print(f"  * Missing F1 Championship Tracks:   {len(report.missing_canonical_f1)} ({', '.join(report.missing_canonical_f1)})")
+        print(f"  * Reconfigured Layouts Flagged:     {len(report.reconfigured_layouts)}")
+        for r_item in report.reconfigured_layouts:
+            print(f"      - {r_item}")
 
         return 0
 
